@@ -1700,8 +1700,13 @@ function viewConfig() {
   const seg = (name, val, opts) => `<div class="seg" style="grid-template-columns:repeat(${opts.length},1fr)" role="radiogroup">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${val === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
   return `<div class="page" data-cfg>
     <div class="page-head"><h2>Configuración</h2><span class="muted">Entraste como ${esc(S.auth && S.auth.user)}</span><span class="spacer"></span>
-      <button class="btn" data-act="cfg-lock">Bloquear y salir</button></div>
+      <button class="btn" data-act="cfg-lock">Bloquear y salir</button><button class="btn primary" data-act="logout">Cerrar sesión</button></div>
     <div class="cfg">
+      <div class="card"><header><h3>Sesión</h3></header><div class="body">
+        <p class="hint" style="margin:0">Entraste a la app como <strong>${esc(S.user && S.user.email)}</strong>. Al cerrar sesión, la app vuelve a pedir el correo y la contraseña en este equipo. Los otros equipos siguen conectados.</p>
+        <div class="actions end"><button class="btn" data-act="logout">Cerrar sesión en este equipo</button></div>
+      </div></div>
+
       <div class="card"><header><h3>Local</h3></header><div class="body">
         <label class="field"><span>Nombre que aparece arriba a la izquierda</span><input id="c-name" class="text" value="${esc(st.businessName || "")}" placeholder="Pietra"></label>
         <label class="field"><span>Monto del envío lejano para el cadete ($)</span><input id="c-far" class="text" type="number" min="1" step="1" value="${farFee()}"></label>
@@ -1721,11 +1726,6 @@ function viewConfig() {
       </div></div>
 
       <div class="card"><header><h3>Impresora Bluetooth</h3></header><div class="body" id="c-printer">${printerCard()}</div></div>
-
-      <div class="card"><header><h3>Sesión</h3></header><div class="body">
-        <p class="hint" style="margin:0">Entraste a la app como <strong>${esc(S.user && S.user.email)}</strong>. Los usuarios se crean y se borran en Firebase → Authentication.</p>
-        <div class="actions end"><button class="btn" data-act="logout">Cerrar sesión en este equipo</button></div>
-      </div></div>
 
       <div class="card"><header><h3>Importar datos</h3></header><div class="body">
         <p class="hint" style="margin:0">Para pasar los datos de la versión anterior: elegí el archivo <strong>pietra-datos.json</strong>. Se hace una sola vez; si un dato ya existe con el mismo código, se reemplaza.</p>
