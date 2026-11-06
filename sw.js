@@ -1,6 +1,6 @@
 // Guarda la app en el equipo para que abra aunque no haya internet.
 // Las páginas propias se piden primero a internet (así llegan las versiones nuevas) y, si no hay conexión, se usan las guardadas.
-const CACHE = "pietra-v1";
+const CACHE = "pietra-v2";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js",
@@ -16,7 +16,8 @@ self.addEventListener("fetch", e => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin === self.location.origin) {
-    e.respondWith(fetch(req).then(r => { const cp = r.clone(); caches.open(CACHE).then(c => c.put(req, cp)); return r; })
+    // cache: "no-cache" pregunta siempre a GitHub si hay una versión nueva (si no cambió, la respuesta es mínima).
+    e.respondWith(fetch(req, {cache: "no-cache"}).then(r => { const cp = r.clone(); caches.open(CACHE).then(c => c.put(req, cp)); return r; })
       .catch(() => caches.match(req, {ignoreSearch: true}).then(r => r || caches.match("./index.html"))));
     return;
   }

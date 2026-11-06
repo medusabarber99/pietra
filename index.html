@@ -633,7 +633,15 @@ async function init() {
   window.addEventListener("beforeunload", e => { if (OB.ops.length) { e.preventDefault(); e.returnValue = ""; } });
   setInterval(() => { if (OB.ops.length && !OB.flushing) flush(); else if (!OB.ops.length && !OB.net && navigator.onLine !== false) { OB.net = true; render(); } }, 7000);
   render();
-  if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("./sw.js").catch(() => {});
+  if ("serviceWorker" in navigator && location.protocol === "https:") {
+    // Cuando se publica una versión nueva, se avisa para cargarla con un toque.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController) S.updateReady = true; render(); });
+    navigator.serviceWorker.register("./sw.js", {updateViaCache: "none"}).then(reg => {
+      setInterval(() => reg.update().catch(() => {}), 10 * 60000);
+      document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
   if (!fbConfigured()) { S.status = "nocfg"; render(); return; }
   await startFirebase();
   AUTH.onAuthStateChanged(u => {
@@ -711,6 +719,8 @@ function render() {
 
   renderSync();
   let banner = "";
+  if (S.updateReady) banner = `<p class="banner"><span><strong>Hay una versión nueva de la app.</strong> Tocá Actualizar para verla${OB.ops.length ? " (los cambios sin sincronizar se conservan)" : ""}.</span><button class="btn sm primary" data-act="app-update">Actualizar</button></p>`;
+  else
   if (S.status !== "loading" && S.status !== "nocfg" && !OB.net) banner = `<p class="banner bad"><span><strong>Sin conexión.</strong> Seguí vendiendo normalmente: ventas, cobros y pedidos se guardan en este equipo y se sincronizan solos cuando vuelva internet.${OB.ops.length ? ` <strong>${plural(OB.ops.length, "cambio pendiente", "cambios pendientes")}.</strong>` : ""}</span><button class="btn sm" data-act="sync">Ver detalle</button></p>`;
   else if (S.status === "slow") banner = `<p class="banner">No se puede llegar a la base de datos todavía. Lo que ves puede estar desactualizado; la app sigue intentando.</p>`;
   else if (S.status === "error") banner = S.err === "permiso"
@@ -1540,6 +1550,7 @@ const A = {
   "sync-discard": el => { OB.failed.splice(Number(el.dataset.i), 1); obSave(); openSync(); render(); },
   config: () => openConfig(),
   logout: () => { if (OB.ops.length && !confirmLogout()) return; AUTH.signOut().finally(() => location.reload()); },
+  "app-update": () => location.reload(),
   "cfg-lock": () => { leaveConfig(); S.view = "vender"; render(); toast("Configuración bloqueada"); },
   "ticket-view": el => openTicketView(el.dataset.id),
   "charge-cart": () => openCharge(null),
