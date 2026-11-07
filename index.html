@@ -195,7 +195,7 @@ main{overflow:auto;min-height:0}
 .srow .who{font-weight:600}
 .srow .what{font-size:13px;color:var(--muted)}
 .srow .amt{font-family:var(--display);font-weight:700;font-size:18px;text-align:right}
-.srow .btns{display:flex;gap:6px}
+.srow .btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 kbd{font:600 11px/1 var(--body);border:1px solid currentColor;border-radius:4px;padding:2px 4px;opacity:.7;margin-left:4px}
 .kbd-hint{display:none}
 @media (min-width:1000px) and (pointer:fine){ .kbd-hint{display:inline} }
@@ -484,7 +484,7 @@ function looksLikePhone() {
 function detectPhone() { const m = S.devMode || deviceSetting(); return m === "phone" ? true : m === "pc" ? false : looksLikePhone(); }
 const viewsHere = () => S.phone ? VIEWS.filter(v => v[0] !== "vender") : VIEWS;
 // Acciones de venta y cobro que no se hacen desde el celular.
-const PC_ONLY = new Set(["add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift"]);
+const PC_ONLY = new Set(["add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit"]);
 const NAV_ICONS = {
   ventas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"></path><path d="M9 7h6M9 11h6M9 15h4"></path></svg>',
   turno: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
@@ -872,7 +872,7 @@ function viewSell() {
           <button class="btn primary" data-act="charge-cart" ${can ? "" : "disabled"}>Cobrar ahora<kbd class="kbd-hint">F2</kbd></button>
           <button class="btn dark" data-act="hold" ${can ? "" : "disabled"}>Guardar cambios<kbd class="kbd-hint">F4</kbd></button>
         </div>
-        <div class="actions"><button class="btn ghost sm" data-act="exit-edit">Salir sin guardar</button><span class="sp"></span><button class="btn danger-ghost sm" data-act="delete-ticket" data-id="${editing.id}">Eliminar ticket</button></div>`
+        <div class="actions"><button class="btn ghost sm" data-act="exit-edit">Salir sin guardar</button><button class="btn sm" data-act="print-edit" ${can ? "" : "disabled"} title="Imprime el pedido como está en pantalla">Imprimir ticket</button><span class="sp"></span><button class="btn danger-ghost sm" data-act="delete-ticket" data-id="${editing.id}">Eliminar ticket</button></div>`
     : `<div class="paybtns">
           <button class="btn primary" data-act="charge-cart" ${can ? "" : "disabled"}>Cobrar ahora<kbd class="kbd-hint">F2</kbd></button>
           <button class="btn dark" data-act="hold" ${can ? "" : "disabled"}>Guardar ticket<kbd class="kbd-hint">F4</kbd></button>
@@ -1249,7 +1249,7 @@ function openSaved() {
           <div class="what"><span class="age ${isStale(s) ? "late" : ""}">${isStale(s) ? `Hace ${ageText(s)} sin cobrar` : `Hace ${ageText(s)}`}</span> · creado ${hhmm(s.createdAt)}</div>
           <div class="what">${itemsText(s.items)}</div>${orderMeta(s) ? `<div class="what">${orderMeta(s, {inline: true})}</div>` : ""}</div>
         <span class="amt">${fmt(s.total)}</span>
-        <div class="btns"><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
+        <div class="btns"><button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir ticket</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`).join("")}</div>`;
   };
   openModal("Guardados", `<div class="seg" role="radiogroup" aria-label="Ordenar por">
@@ -1326,16 +1326,18 @@ async function chargeCart(payment, received, btn) {
   if (S.busy) return; S.busy = true; btn.disabled = true;
   const ed = editingSale();
   let ok, num, total = cartTotal(), change = payment === "efectivo" ? Math.max(0, (received ?? total) - total) : null;
+  // Se toma el pedido ANTES de guardar: al guardarlo la pantalla se refresca y el panel se vacía.
+  const fields = cartFields(), paidAt = Date.now();
   if (ed) {
     num = ed.num;
-    ok = queue("update", "sales/" + ed.id, {...cartFields(), status: "paid", payment, paidAt: Date.now(), received: payment === "efectivo" ? received : null, change}, `Ticket #${ed.num} cobrado (${PAY[payment]} ${fmt(total)})`);
+    ok = queue("update", "sales/" + ed.id, {...fields, status: "paid", payment, paidAt, received: payment === "efectivo" ? received : null, change}, `Ticket #${ed.num} cobrado (${PAY[payment]} ${fmt(total)})`);
   } else {
     const sale = newSale("paid", payment, received), id = newId("sales"); num = sale.num; S._lastSale = {...sale, id};
     ok = queue("set", "sales/" + id, sale, `Venta #${sale.num} cobrada (${PAY[payment]} ${fmt(total)})`);
   }
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
-  const printed = ed ? {...ed, ...cartFields(), status: "paid", payment, paidAt: Date.now(), received, change} : null;
+  const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change} : null;
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
@@ -1704,6 +1706,8 @@ const A = {
   "exit-edit": () => { resetCart(); render(); toast("Saliste del ticket sin guardar cambios"); },
   "delete-ticket": el => openDeleteTicket(el.dataset.id),
   "open-ticket": el => openTicket(el.dataset.id),
+  "print-saved": el => printPendingNow(S.sales.find(x => x.id === el.dataset.id), el),
+  "print-edit": el => { const ed = editingSale(); if (ed) printPendingNow({...ed, ...cartFields(), editedAt: Date.now()}, el); },
   saved: () => openSaved(),
   sync: () => openSync(),
   "sync-now": () => { OB.net = true; closeModal(); flush(); toast(OB.ops.length ? "Intentando sincronizar…" : "No hay cambios pendientes"); },
@@ -2083,7 +2087,8 @@ function receiptLines(sale, T) {
   const label = kind === "pending" ? "PEDIDO PENDIENTE" : "COMPROBANTE DE PAGO";
   const lab = " " + label + " ", side = Math.max(0, Math.floor((W - lab.length) / 2));
   L.push({t: " ".repeat(side) + lab + " ".repeat(Math.max(0, W - side - lab.length)), b: true, inv: true});
-  if (sale._reprint) L.push({t: "(reimpresión)", c: true});
+  if (sale._updated) L.push({t: `(actualizado ${fmtDate(sale._updated).slice(-5)})`, c: true});
+  else if (sale._reprint) L.push({t: "(reimpresión)", c: true});
   L.push({t: pair(`Ticket ${sale.num ?? ""}`, fmtDate(kind === "pending" ? sale.createdAt : (sale.paidAt || sale.createdAt)), W), b: true});
   const who = [sale.note, sale.mode === "envio" ? "ENVÍO" : sale.mode === "retiro" ? "RETIRO" : ""].filter(Boolean).join(" · ");
   if (who) wrapText(who, W).forEach(t => L.push({t, b: true}));
@@ -2252,10 +2257,23 @@ async function printCopy(sale, kind, opts = {}) {
   const already = !!(sale[flag] || (live && live[flag]));
   if (!opts.manual && (already || printingNow.has(key))) return false;
   printingNow.add(key);
-  const ok = await printSale({...sale, _copy: kind, _reprint: !!opts.manual && already});
+  // Copia manual de un pedido que cambió desde la última impresión: se marca "actualizado".
+  const lastAt = (live && live.printedPendingAt) || sale.printedPendingAt || 0;
+  const updated = opts.manual && kind === "pending" && already && sale.editedAt && sale.editedAt > lastAt ? sale.editedAt : 0;
+  const ok = await printSale({...sale, _copy: kind, _reprint: !!opts.manual && already && !updated, _updated: updated});
   printingNow.delete(key);
-  if (ok && !already && sale.id) queue("update", "sales/" + sale.id, {[flag]: true}, `Ticket #${sale.num}: ${kind === "pending" ? "copia de pedido" : "comprobante"} impreso`);
+  if (ok && sale.id && (!already || kind === "pending")) queue("update", "sales/" + sale.id, kind === "pending" ? {printedPending: true, printedPendingAt: Date.now()} : {printedPaid: true}, `Ticket #${sale.num}: ${kind === "pending" ? "copia de pedido" : "comprobante"} impreso`);
   return ok;
+}
+// Botón "Imprimir ticket" de un pedido guardado: imprime cómo está ahora (también lo que se está editando sin guardar).
+async function printPendingNow(sale, btn) {
+  if (!sale || !isPending(sale)) return;
+  if (!S.printer) { toast("Conectá la impresora (arriba, en el estado de la impresora) para imprimir.", "bad"); return; }
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Imprimiendo…"; }
+  const ok = await printCopy(sale, "pending", {manual: true});
+  if (btn && document.body.contains(btn)) { btn.disabled = false; btn.textContent = label; }
+  if (ok) toast(`Ticket #${sale.num} impreso`);
 }
 
 // Ticket de cierre de turno: resumen de ventas, cobros, caja, cadete, productos y notas.
