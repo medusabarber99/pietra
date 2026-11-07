@@ -81,10 +81,12 @@ textarea.text{min-height:76px;resize:vertical;font-family:var(--body)}
 .receipt .b{font-weight:700}
 .receipt .big{font-size:2em;line-height:1.15;letter-spacing:0}
 .receipt .sep{color:#9A9A9A}
+.receipt .inv{background:#141414;color:#FFFFFF}
 .receipt img{display:block;margin:0 auto 6px;max-width:60%;max-height:90px;object-fit:contain;filter:grayscale(1) contrast(1.6)}
 .receipt .cut{height:14px;margin:10px -12px 0;background:linear-gradient(135deg,#FFFFFF 50%,transparent 50%) 0 0/12px 12px repeat-x,linear-gradient(225deg,#FFFFFF 50%,transparent 50%) 0 0/12px 12px repeat-x}
 .tk-preview{display:flex;flex-direction:column;gap:10px;align-items:center;background:var(--sunk);border-radius:12px;padding:14px;min-width:0}
-.tk-preview .seg{width:100%;max-width:340px}
+.tk-preview .seg{width:100%;max-width:400px}
+.tk-preview .seg label{padding:8px 4px;font-size:13px}
 .tk-preview #t-preview{max-width:100%;overflow-x:auto}
 .statusline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .login{max-width:420px}
@@ -1184,13 +1186,14 @@ async function holdTicket(btn) {
     msg = `Ticket #${ed.num} actualizado · ${fmt(cartTotal())}`;
     ok = queue("update", "sales/" + ed.id, cartFields(), `Ticket #${ed.num} editado`);
   } else {
-    const sale = newSale("pending");
+    const sale = newSale("pending"), id = newId("sales");
     msg = `Ticket #${sale.num}${sale.note ? " de " + sale.note : ""} guardado · ${fmt(sale.total)} por cobrar`;
-    ok = queue("set", "sales/" + newId("sales"), sale, `Ticket #${sale.num} guardado (${fmt(sale.total)})`);
+    ok = queue("set", "sales/" + id, sale, `Ticket #${sale.num} guardado (${fmt(sale.total)})`);
+    if (ok) printCopy({...sale, id}, "pending"); // 1.ª copia: Pedido pendiente (solo al guardarlo, no al editarlo)
   }
   S.busy = false;
   if (!ok) { if (btn) btn.disabled = false; return; }
-  resetCart(); render(); toast(msg);
+  resetCart(); render(); toast(msg + (!ed && !S.printer && !S.phone ? " · sin impresora conectada" : ""));
 }
 
 // Reabrir un ticket guardado en el panel del pedido para editarlo.
@@ -1327,16 +1330,17 @@ async function chargeCart(payment, received, btn) {
     num = ed.num;
     ok = queue("update", "sales/" + ed.id, {...cartFields(), status: "paid", payment, paidAt: Date.now(), received: payment === "efectivo" ? received : null, change}, `Ticket #${ed.num} cobrado (${PAY[payment]} ${fmt(total)})`);
   } else {
-    const sale = newSale("paid", payment, received); num = sale.num; S._lastSale = sale;
-    ok = queue("set", "sales/" + newId("sales"), sale, `Venta #${sale.num} cobrada (${PAY[payment]} ${fmt(total)})`);
+    const sale = newSale("paid", payment, received), id = newId("sales"); num = sale.num; S._lastSale = {...sale, id};
+    ok = queue("set", "sales/" + id, sale, `Venta #${sale.num} cobrada (${PAY[payment]} ${fmt(total)})`);
   }
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
-  const printed = ed ? {...ed, ...cartFields(), status: "paid", payment, received, change} : null;
+  const printed = ed ? {...ed, ...cartFields(), status: "paid", payment, paidAt: Date.now(), received, change} : null;
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
-  autoPrint(printed || S._lastSale);
+  // Ticket guardado que se cobra: 2.ª copia, Comprobante de pago. Venta directa: según "imprimir al cobrar".
+  if (printed) printCopy(printed, "paid"); else autoPrint(S._lastSale);
   toast(`${ed ? "Ticket" : "Venta"} #${num} cobrado · ${fmt(total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : ""));
 }
 
@@ -1348,7 +1352,7 @@ async function chargeTicket(s, payment, received, btn) {
   if (!ok) { btn.disabled = false; return; }
   closeModal();
   moneyBurst(s.total, payment, change);
-  autoPrint({...s, status: "paid", payment, received, change});
+  printCopy({...s, status: "paid", payment, paidAt: Date.now(), received, change}, "paid"); // 2.ª copia: Comprobante de pago
   toast(`Ticket #${s.num} cobrado · ${fmt(s.total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : ""));
 }
 
@@ -1931,8 +1935,8 @@ function viewConfig() {
           <label class="check"><input type="checkbox" id="t-auto" ${T.autoPrint ? "checked" : ""}> Imprimir el ticket automáticamente al cobrar</label>
           <div class="actions end"><button class="btn primary" id="t-save">Guardar ticket</button></div>
         </div>
-        <div class="tk-preview"><div class="seg two-opt compact" role="radiogroup" aria-label="Vista previa">
-            <label><input type="radio" name="t-pv" value="venta" checked>Venta</label><label><input type="radio" name="t-pv" value="cierre">Cierre de turno</label></div>
+        <div class="tk-preview"><div class="seg compact" style="grid-template-columns:repeat(3,1fr)" role="radiogroup" aria-label="Vista previa">
+            <label><input type="radio" name="t-pv" value="pendiente">Pedido pendiente</label><label><input type="radio" name="t-pv" value="venta" checked>Comprobante</label><label><input type="radio" name="t-pv" value="cierre">Cierre</label></div>
           <div id="t-preview"></div><small class="muted" id="t-pvinfo"></small></div></div>
       </div></div>
     </div></div>`;
@@ -1969,7 +1973,7 @@ function mountConfig() {
   const prev = () => {
     let W, L;
     if (pv === "cierre") { const c = sampleClosing(); const T = {...tkDraft, logo: ""}; W = paperCols(T); L = closingLines(c.sh, c.sales, c.notes, T); m.querySelector("#t-preview").innerHTML = receiptHtmlFromLines(W, L, T); }
-    else { ({W, L} = receiptLines(sampleSale(), tkDraft)); m.querySelector("#t-preview").innerHTML = receiptHtmlFromLines(W, L, tkDraft); }
+    else { const ss = pv === "pendiente" ? {...sampleSale(), status: "pending", payment: null, received: null, change: null} : sampleSale(); ({W, L} = receiptLines(ss, tkDraft)); m.querySelector("#t-preview").innerHTML = receiptHtmlFromLines(W, L, tkDraft); }
     const cm = Math.round((L.length * 0.42 + (pv === "venta" && tkDraft.logo ? 2.5 : 0) + L.filter(l => l.big).length * 0.42 + 1.5) * 10) / 10;
     m.querySelector("#t-pvinfo").textContent = `Ejemplo · ${L.length} renglones · unos ${String(cm).replace(".", ",")} cm de papel`; const lp = m.querySelector("#t-logoprev"); lp.innerHTML = tkDraft.logo ? `<img src="${esc(tkDraft.logo)}" alt="Logo" style="object-fit:contain">` : "Sin logo"; m.querySelector("#t-nologo").hidden = !tkDraft.logo; };
   m.querySelector("#t-header").oninput = e => { tkDraft.header = e.target.value; prev(); };
@@ -2074,8 +2078,13 @@ function itemLines(items, W) {
 function receiptLines(sale, T) {
   const W = paperCols(T), H = Math.floor(W / 2);
   const L = headerLines(T, W);
-  L.push(sepLine(W));
-  L.push({t: pair(`Ticket ${sale.num ?? ""}`, fmtDate(sale.paidAt || sale.createdAt), W), b: true});
+  // Rótulo de la copia en negativo (blanco sobre negro): ocupa un solo renglón y se distingue de lejos.
+  const kind = sale._copy || (sale.status === "pending" ? "pending" : "paid");
+  const label = kind === "pending" ? "PEDIDO PENDIENTE" : "COMPROBANTE DE PAGO";
+  const lab = " " + label + " ", side = Math.max(0, Math.floor((W - lab.length) / 2));
+  L.push({t: " ".repeat(side) + lab + " ".repeat(Math.max(0, W - side - lab.length)), b: true, inv: true});
+  if (sale._reprint) L.push({t: "(reimpresión)", c: true});
+  L.push({t: pair(`Ticket ${sale.num ?? ""}`, fmtDate(kind === "pending" ? sale.createdAt : (sale.paidAt || sale.createdAt)), W), b: true});
   const who = [sale.note, sale.mode === "envio" ? "ENVÍO" : sale.mode === "retiro" ? "RETIRO" : ""].filter(Boolean).join(" · ");
   if (who) wrapText(who, W).forEach(t => L.push({t, b: true}));
   if (sale.mode === "envio" && sale.address) wrapText(sale.address, W).forEach(t => L.push({t}));
@@ -2083,8 +2092,8 @@ function receiptLines(sale, T) {
   L.push(...itemLines(sale.items, W));
   if (sale.orderNote) { L.push(sepLine(W)); wrapText("NOTA: " + sale.orderNote, W).forEach(t => L.push({t, b: true})); }
   L.push(sepLine(W));
-  L.push({t: pair("TOTAL", money(sale.total), H), b: true, big: true});
-  if (sale.status === "pending") L.push({t: "PENDIENTE DE PAGO", c: true, b: true});
+  L.push({t: pair(kind === "pending" ? "A COBRAR" : "TOTAL", money(sale.total), H), b: true, big: true});
+  if (kind === "pending") L.push({t: "Todavía no se cobró", c: true});
   else if (sale.payment) {
     L.push({t: pair("Pago", PAY[sale.payment] || sale.payment, W)});
     if (sale.payment === "efectivo" && sale.change) { L.push({t: pair("Entregó", money(sale.received), W)}); L.push({t: pair("Vuelto", money(sale.change), W)}); }
@@ -2098,7 +2107,7 @@ function receiptHtmlFromLines(W, L, T) {
   const ascii = T.charset === "ascii";
   const txt = t => ascii ? String(t).replace(/─/g, "-").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[¿¡]/g, "") : t;
   // Sin espacios entre etiquetas: el papel usa white-space:pre y los mostraría como renglones vacíos.
-  return `<div class="receipt" style="--cols:${W}" role="img" aria-label="Vista previa del ticket">${T.logo ? `<img src="${esc(T.logo)}" alt="">` : ""}${L.map(l => `<div class="${l.c ? "c " : ""}${l.b ? "b " : ""}${l.big ? "big " : ""}${l.sep ? "sep" : ""}">${esc(txt(l.t)) || " "}</div>`).join("")}<div class="cut" aria-hidden="true"></div></div>`;
+  return `<div class="receipt" style="--cols:${W}" role="img" aria-label="Vista previa del ticket">${T.logo ? `<img src="${esc(T.logo)}" alt="">` : ""}${L.map(l => `<div class="${l.c ? "c " : ""}${l.b ? "b " : ""}${l.big ? "big " : ""}${l.sep ? "sep " : ""}${l.inv ? "inv" : ""}">${esc(txt(l.t)) || " "}</div>`).join("")}<div class="cut" aria-hidden="true"></div></div>`;
 }
 function receiptHtml(sale, T) { const {W, L} = receiptLines(sale, T); return receiptHtmlFromLines(W, L, T); }
 
@@ -2112,7 +2121,7 @@ function openTicketView(id) {
   openModal(`Ticket #${s.num ?? ""}`, `<div style="display:grid;place-items:center">${receiptHtml(s, S.ticket)}</div>
     ${S.printer ? "" : `<p class="hint">Para imprimir, conectá la impresora en Configuración.</p>`}
     <div class="actions end"><button class="btn ghost" data-act="close-modal">Cerrar</button><button class="btn primary" id="tprint" ${S.printer ? "" : "disabled"}>Imprimir</button></div>`,
-    {onMount: d => d.querySelector("#tprint").onclick = async e => { e.target.disabled = true; await printSale(s); e.target.disabled = false; }});
+    {onMount: d => d.querySelector("#tprint").onclick = async e => { e.target.disabled = true; await printCopy(s, s.status === "pending" ? "pending" : "paid", {manual: true}); e.target.disabled = false; }});
 }
 
 /* ---------- Impresora Bluetooth (ESC/POS) ---------- */
@@ -2209,11 +2218,11 @@ async function escposLines(L, T) {
   const b = [0x1B, 0x40, 0x1B, 0x74, CHARSETS[cs].n];
   if (T.logo) { b.push(0x1B, 0x61, 0x01); b.push(...await logoRaster(T.logo, dots)); }
   L.forEach(l => {
-    b.push(0x1B, 0x61, l.c ? 1 : 0, 0x1B, 0x45, l.b ? 1 : 0, 0x1D, 0x21, l.big ? 0x11 : 0x00);
+    b.push(0x1B, 0x61, l.c ? 1 : 0, 0x1B, 0x45, l.b ? 1 : 0, 0x1D, 0x21, l.big ? 0x11 : 0x00, 0x1D, 0x42, l.inv ? 1 : 0);
     b.push(...encText(l.t, cs), 0x0A);
   });
   // Avance justo para llegar al corte (3 renglones) y corte parcial.
-  b.push(0x1B, 0x61, 0, 0x1D, 0x21, 0, 0x1B, 0x45, 0, 0x1B, 0x64, 0x03, 0x1D, 0x56, 0x42, 0x00);
+  b.push(0x1B, 0x61, 0, 0x1D, 0x21, 0, 0x1B, 0x45, 0, 0x1D, 0x42, 0, 0x1B, 0x64, 0x03, 0x1D, 0x56, 0x42, 0x00);
   return new Uint8Array(b);
 }
 async function printSale(sale, T) { return printBytes(() => escposFor(sale, T || S.ticket)); }
@@ -2231,7 +2240,23 @@ async function printBytes(make) {
     return true;
   } catch (e) { toast("No se pudo imprimir. Revisá que la impresora siga prendida y conectada.", "bad"); return false; }
 }
-function autoPrint(sale) { if (sale && S.printer && S.ticket.autoPrint) printSale(sale); }
+function autoPrint(sale) { if (sale && S.printer && S.ticket.autoPrint) printCopy(sale, "paid"); }
+// Copias automáticas: "pending" al guardar un pedido y "paid" al cobrarlo. Cada ticket guarda en la cuenta
+// qué copia ya salió (printedPending / printedPaid), así no se repite aunque se toque dos veces o se cobre desde otro equipo.
+const printingNow = new Set();
+async function printCopy(sale, kind, opts = {}) {
+  if (!sale || !S.printer) return false;
+  const flag = kind === "pending" ? "printedPending" : "printedPaid";
+  const key = (sale.id || sale.num) + ":" + kind;
+  const live = sale.id ? S.sales.find(x => x.id === sale.id) : null;
+  const already = !!(sale[flag] || (live && live[flag]));
+  if (!opts.manual && (already || printingNow.has(key))) return false;
+  printingNow.add(key);
+  const ok = await printSale({...sale, _copy: kind, _reprint: !!opts.manual && already});
+  printingNow.delete(key);
+  if (ok && !already && sale.id) queue("update", "sales/" + sale.id, {[flag]: true}, `Ticket #${sale.num}: ${kind === "pending" ? "copia de pedido" : "comprobante"} impreso`);
+  return ok;
+}
 
 // Ticket de cierre de turno: resumen de ventas, cobros, caja, cadete, productos y notas.
 function closingLines(sh, sales, notes, T) {
