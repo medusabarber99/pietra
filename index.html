@@ -302,7 +302,41 @@ tr.click:hover td{background:var(--sunk)}
   .row2{grid-template-columns:1fr}
   th,td{padding:9px 10px}
 }
-@media (prefers-reduced-motion:reduce){*{transition:none !important}}
+/* ---------- Animaciones sutiles (transform y opacity, cortas, sin bloquear controles) ---------- */
+@keyframes fx-bump{0%{transform:scale(1)}35%{transform:scale(.94)}70%{transform:scale(1.03)}100%{transform:scale(1)}}
+@keyframes fx-line-in{from{opacity:0;transform:translateX(16px)}to{opacity:1;transform:none}}
+@keyframes fx-qty{0%{transform:scale(1)}45%{transform:scale(1.35)}100%{transform:scale(1)}}
+@keyframes fx-flash{0%{background-color:var(--accent-soft)}100%{background-color:transparent}}
+@keyframes fx-pill{0%{transform:scale(.8);opacity:.4}55%{transform:scale(1.08);opacity:1}100%{transform:scale(1)}}
+@keyframes fx-ring{0%{opacity:.7;transform:scale(1)}100%{opacity:0;transform:scale(1.6)}}
+@keyframes fx-view{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes fx-fade{from{opacity:0}to{opacity:1}}
+@keyframes fx-card{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:scale(1)}}
+@keyframes fx-draw{to{stroke-dashoffset:0}}
+@keyframes fx-tick{0%{opacity:0;transform:scale(.6)}60%{opacity:1;transform:scale(1.15)}100%{transform:scale(1)}}
+.fx-bump{animation:fx-bump .26s ease-out}
+.fx-line-in{animation:fx-line-in .22s ease-out, fx-flash .9s ease-out}
+.fx-qty{display:inline-block;animation:fx-qty .22s ease-out}
+.fx-pill{position:relative;animation:fx-pill .45s cubic-bezier(.2,.8,.3,1.2)}
+.fx-pill::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:0 0 0 2px var(--ok);animation:fx-ring .9s ease-out .1s both;pointer-events:none}
+.fx-view{animation:fx-view .18s ease-out}
+.tick{display:inline-flex;align-items:center;gap:5px;color:var(--ok);font-weight:600}
+.tick svg{width:14px;height:14px}
+.tick.fx-tick svg{animation:fx-tick .35s ease-out}
+.closing-fx{position:fixed;inset:0;z-index:75;display:grid;place-items:center;pointer-events:none;background:rgba(20,18,16,.28);animation:fx-fade .18s ease-out}
+.closing-fx.out{opacity:0;transition:opacity .3s ease-in}
+.closing-card{background:var(--surface);color:var(--ink);border-radius:20px;padding:24px 32px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:0 20px 60px rgba(0,0,0,.3);animation:fx-card .25s ease-out;text-align:center}
+.closing-card svg{width:64px;height:64px}
+.closing-card circle{fill:var(--ok-soft);stroke:var(--ok);stroke-width:3}
+.closing-card path{fill:none;stroke:var(--ok);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:48;stroke-dashoffset:48;animation:fx-draw .4s ease-out .15s forwards}
+.closing-card strong{font:800 22px var(--display)}
+.closing-card span{color:var(--muted);font-size:14px}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none !important}
+  .fx-bump,.fx-line-in,.fx-qty,.fx-pill,.fx-view,.closing-fx,.closing-card,.tick.fx-tick svg{animation:none !important}
+  .fx-pill::after{display:none}
+  .closing-card path{animation:none;stroke-dashoffset:0}
+}
 
 /* ---------- Celular (modo consulta) ---------- */
 .bottomnav{display:none}
@@ -800,7 +834,7 @@ function viewSell() {
   }
   const total = cartTotal();
   const can = S.cart.length && sh;
-  const lines = S.cart.length ? S.cart.map((l, i) => `<div class="line">
+  const lines = S.cart.length ? S.cart.map((l, i) => `<div class="line" data-id="${esc(l.id)}">
       <div><div class="nm">${esc(l.name)}</div><div class="up">${fmt(l.price)} c/u</div></div>
       <div class="stepper"><button data-act="dec" data-i="${i}" aria-label="Quitar uno de ${esc(l.name)}">−</button><span>${l.qty}</span><button data-act="inc" data-i="${i}" aria-label="Agregar uno de ${esc(l.name)}">+</button></div>
       <div class="st">${fmt(l.price * l.qty)}</div></div>`).join("")
@@ -950,7 +984,7 @@ function viewShift() {
         ${S.phone ? "" : `<button class="btn primary" data-act="close-shift">Cerrar turno</button>`}</div>
       ${S.phone ? `<p class="pcnote">Estás viendo el turno en vivo. Se cierra desde la PC de la caja.</p>` : ""}
       ${tilesHtml(sum, true)}
-      <div class="card"><header><h3>Notas del turno</h3><span class="muted" id="notes-state">${S.notesSaving ? "Guardando…" : "Se borran al cerrar el turno"}</span></header>
+      <div class="card"><header><h3>Notas del turno</h3><span class="muted" id="notes-state">${S.notesSavedAt && Date.now() - S.notesSavedAt < 5000 ? notesSavedHtml() : "Se borran al cerrar el turno"}</span></header>
         <div class="body notesbody"><textarea id="shiftnotes" class="text" rows="4" placeholder="Ej.: faltó cambio de $100, avisar a Juan que mañana entra 18 h, pedido grande para el sábado…">${esc(S.notesDraft != null && S.notesDraftId === sh.id ? S.notesDraft : (sh.notes || ""))}</textarea></div></div>
       <div class="two">
         <div class="card"><header><h3>Productos vendidos</h3></header>${productsTable(sum.products)}</div>
@@ -1043,12 +1077,36 @@ function toast(msg, kind) {
   $("#toast").appendChild(t); setTimeout(() => t.remove(), kind === "bad" ? 5000 : 2600);
 }
 
+/* ---------- Animaciones ---------- */
+const reduceMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
+// Reproduce una animación CSS sobre un elemento sin bloquear nada (la clase se quita sola al terminar).
+function fx(el, cls) {
+  if (!el || reduceMotion()) return;
+  el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls);
+  el.addEventListener("animationend", function done(e) { if (e.target === el) { el.classList.remove(cls); el.removeEventListener("animationend", done); } });
+}
+const fxLater = f => requestAnimationFrame(() => requestAnimationFrame(f));
+function closingFx(sum) {
+  const box = document.createElement("div"); box.className = "closing-fx"; box.setAttribute("aria-hidden", "true");
+  box.innerHTML = `<div class="closing-card"><svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29"></circle><path d="M19 33 l9 9 l17 -19"></path></svg><strong>Turno cerrado</strong><span>Total cobrado ${fmt(sum.total)}</span></div>`;
+  document.body.appendChild(box);
+  setTimeout(() => box.classList.add("out"), reduceMotion() ? 900 : 1100);
+  setTimeout(() => box.remove(), reduceMotion() ? 1250 : 1450);
+}
+
 /* ---------- Ventas y cobro ---------- */
 function addToCart(id) {
   const m = S.menu.find(x => x.id === id); if (!m) return;
   const l = S.cart.find(x => x.id === id);
   if (l) l.qty++; else S.cart.push({id: m.id, name: m.name, price: Number(m.price) || 0, qty: 1});
   render();
+  const btn = document.querySelector(`.prod[data-id="${CSS.escape(id)}"]`);
+  fx(btn, "fx-bump"); fx(btn && btn.querySelector(".q"), "fx-qty");
+  const line = document.querySelector(`.lines .line[data-id="${CSS.escape(id)}"]`);
+  if (line) {
+    if (l) fx(line.querySelector(".stepper span"), "fx-qty");
+    else { fx(line, "fx-line-in"); line.scrollIntoView({block: "nearest", behavior: reduceMotion() ? "auto" : "smooth"}); }
+  }
 }
 
 function newSale(status, payment, received) {
@@ -1314,6 +1372,7 @@ async function openShift() {
   S.busy = true;
   const cash = Number(S.openCash) || 0;
   const ok = queue("set", "shifts/" + newId("shifts"), {status: "open", openedAt: Date.now(), openingCash: cash, cadeteBase: cadeteBase(), notes: ""}, `Turno abierto (fondo ${fmt(cash)})`); toast("Turno abierto");
+  fxLater(() => fx(document.querySelector("#shiftpill .pill"), "fx-pill"));
   S.busy = false;
   if (ok) S.openCash = "";
 }
@@ -1365,8 +1424,8 @@ async function doCloseShift(sh, sales, sum, counted, btn) {
   const closedShift = {...sh, status: "closed", closedAt, summary: sum, countedCash: counted, notes: ""};
   if (S.printer) printClosing(closedShift, clean, notes).then(ok => { if (ok) toast("Ticket de cierre impreso"); });
   for (const s of sales) { try { await S.db.doc("sales/" + s.id).delete(); } catch (e) {} }
-  toast("Turno cerrado");
-  showShiftDetail(closedShift, notes);
+  closingFx(sum);
+  setTimeout(() => showShiftDetail(closedShift, notes), reduceMotion() ? 0 : 750);
 }
 
 function showShiftDetail(sh, notesAtClose = "") {
@@ -1392,6 +1451,7 @@ function showShiftDetail(sh, notesAtClose = "") {
 
 // Notas del turno: se guardan solas mientras escribís (también sin conexión) y se vacían al cerrar el turno.
 let notesTimer = null;
+const notesSavedHtml = () => `<span class="tick"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5"></path></svg>Guardado</span>`;
 function onNotesInput(v) {
   const sh = currentShift(); if (!sh) return;
   S.notesDraft = v; S.notesDraftId = sh.id;
@@ -1404,7 +1464,8 @@ function saveNotesNow() {
   const sh = currentShift();
   if (!sh || S.notesDraftId !== sh.id || S.notesDraft == null) return;
   if ((sh.notes || "") !== S.notesDraft) queue("update", "shifts/" + sh.id, {notes: S.notesDraft}, "Notas del turno");
-  const st = $("#notes-state"); if (st) st.textContent = "Guardado · se borran al cerrar el turno";
+  S.notesSavedAt = Date.now();
+  const st = $("#notes-state"); if (st) { st.innerHTML = notesSavedHtml(); fx(st.querySelector(".tick"), "fx-tick"); }
 }
 document.addEventListener("focusout", e => { if (e.target.id === "shiftnotes") { saveNotesNow(); S.notesDraft = null; } });
 
@@ -1585,10 +1646,10 @@ function openProdEdit(id) {
 
 /* ---------- Eventos ---------- */
 const A = {
-  nav: el => { closeModalSilently(); leaveConfig(); S.view = el.dataset.view; try { history.replaceState(null, "", "#" + S.view); } catch (e) { location.hash = S.view; } $("#main").scrollTop = 0; render(); },
+  nav: el => { const changed = S.view !== el.dataset.view; closeModalSilently(); leaveConfig(); S.view = el.dataset.view; try { history.replaceState(null, "", "#" + S.view); } catch (e) { location.hash = S.view; } $("#main").scrollTop = 0; render(); if (changed) fx($("#main").firstElementChild, "fx-view"); },
   cat: el => { S.cat = el.dataset.cat || null; render(); },
   add: el => addToCart(el.dataset.id),
-  inc: el => { S.cart[el.dataset.i].qty++; render(); },
+  inc: el => { const l = S.cart[el.dataset.i]; l.qty++; render(); fx(document.querySelector(`.lines .line[data-id="${CSS.escape(l.id)}"] .stepper span`), "fx-qty"); },
   dec: el => { const l = S.cart[el.dataset.i]; if (--l.qty <= 0) S.cart.splice(el.dataset.i, 1); render(); },
   "clear-cart": () => { resetCart(); render(); },
   "exit-edit": () => { resetCart(); render(); toast("Saliste del ticket sin guardar cambios"); },
