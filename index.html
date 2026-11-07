@@ -119,7 +119,10 @@ nav.tabs .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;p
 .age.late{color:var(--bad)}
 .toast.warn{background:var(--warn);color:#fff}
 .notesbody{padding:12px 16px 16px}
-.notesbody textarea{min-height:96px;width:100%;resize:vertical}
+#shiftnotes{display:block;width:100%;min-height:220px;resize:vertical;background:#FFFFFF;color:#141414;caret-color:#141414;border:1px solid #CFCAC2;border-radius:10px;padding:12px 14px;font:16px/1.55 var(--body);color-scheme:light}
+#shiftnotes::placeholder{color:#8A857D}
+#shiftnotes:focus{outline:3px solid var(--accent);outline-offset:1px;border-color:transparent}
+body.phone #shiftnotes{min-height:200px}
 #printerpill .pill{border:0}
 @media (max-width:1440px){ #gearlabel{display:none} .gear{padding:0 10px} }
 .top .pill{white-space:nowrap}
@@ -812,6 +815,7 @@ function render() {
     if (!S.cfgRendered || !main.querySelector("[data-cfg]")) { main.innerHTML = viewConfig(); mountConfig(); S.cfgRendered = true; }
     return;
   }
+  else if (S.view === "turno" && patchShiftView(main)) { /* solo se actualizaron totales y tablas; las notas siguen intactas */ }
   else main.innerHTML = ({vender: viewSell, ventas: viewSales, turno: viewShift, inventario: viewInv, menu: viewMenu})[S.view]();
 
   const cat = main.querySelector(".catalog"); if (cat) cat.scrollTop = scroll; else main.scrollTop = scroll;
@@ -998,20 +1002,36 @@ function viewSales() {
   </div>`;
 }
 
+// La pantalla de Turno se arma en tres partes. Las notas nunca se vuelven a crear mientras el turno sigue
+// abierto: cuando llegan datos nuevos solo se actualizan los totales y las tablas (patchShiftView).
 function viewShift() {
+  const p = shiftParts();
+  return `<div class="page"><div id="tz-top" class="tz">${p.top}</div>${p.notes ? `<div id="tz-notes" data-shift="${p.shiftId}">${p.notes}</div>` : ""}<div id="tz-rest" class="tz">${p.rest}</div></div>`;
+}
+function patchShiftView(main) {
+  const box = main.querySelector("#tz-notes"), top = main.querySelector("#tz-top"), rest = main.querySelector("#tz-rest");
+  const p = shiftParts();
+  if (!box || !top || !rest || !p.shiftId || box.dataset.shift !== p.shiftId) return false;
+  top.innerHTML = p.top; rest.innerHTML = p.rest;
+  // Si las notas cambiaron desde otro equipo y acá no se está escribiendo, se actualiza el texto sin tocar el campo.
+  const ta = box.querySelector("#shiftnotes"), sh = currentShift();
+  if (ta && sh && document.activeElement !== ta && S.notesDraft == null && ta.value !== (sh.notes || "")) ta.value = sh.notes || "";
+  return true;
+}
+function shiftParts() {
   const sh = currentShift();
   const closed = S.shifts.filter(s => s.status === "closed").sort((a, b) => b.openedAt - a.openedAt);
-  let top;
+  let top, notes = "", rest = "";
   if (sh) {
     const sales = shiftSales(sh.id);
     const sum = summarize(sales, sh.openingCash, shiftCadeteBase(sh));
     top = `<div class="page-head"><h2>Turno abierto</h2><span class="pill ok">Desde las ${hhmm(sh.openedAt)} · ${dur(Date.now() - sh.openedAt)}</span><span class="spacer"></span>
         ${S.phone ? "" : `<button class="btn primary" data-act="close-shift">Cerrar turno</button>`}</div>
       ${S.phone ? `<p class="pcnote">Estás viendo el turno en vivo. Se cierra desde la PC de la caja.</p>` : ""}
-      ${tilesHtml(sum, true)}
-      <div class="card"><header><h3>Notas del turno</h3><span class="muted" id="notes-state">${S.notesSavedAt && Date.now() - S.notesSavedAt < 5000 ? notesSavedHtml() : "Se borran al cerrar el turno"}</span></header>
-        <div class="body notesbody"><textarea id="shiftnotes" class="text" rows="4" placeholder="Ej.: faltó cambio de $100, avisar a Juan que mañana entra 18 h, pedido grande para el sábado…">${esc(S.notesDraft != null && S.notesDraftId === sh.id ? S.notesDraft : (sh.notes || ""))}</textarea></div></div>
-      <div class="two">
+      ${tilesHtml(sum, true)}`;
+    notes = `<div class="card"><header><h3><label for="shiftnotes">Notas del turno</label></h3><span class="muted" id="notes-state" aria-live="polite">${S.notesSavedAt && Date.now() - S.notesSavedAt < 5000 ? notesSavedHtml() : "Se guardan solas · se borran al cerrar el turno"}</span></header>
+        <div class="body notesbody"><textarea id="shiftnotes" rows="8" spellcheck="true" autocomplete="off" placeholder="Ej.: faltó cambio de $100, avisar a Juan que mañana entra 18 h, pedido grande para el sábado…">${esc(S.notesDraft != null && S.notesDraftId === sh.id ? S.notesDraft : (sh.notes || ""))}</textarea></div></div>`;
+    rest = `<div class="two">
         <div class="card"><header><h3>Productos vendidos</h3></header>${productsTable(sum.products)}</div>
         <div class="card"><header><h3>Ventas del turno</h3></header>${salesTable(sales.slice().reverse())}</div>
       </div>`;
@@ -1032,7 +1052,8 @@ function viewShift() {
         <td>${shortDate(s.openedAt)}</td><td>${hhmm(s.openedAt)} a ${s.closedAt ? hhmm(s.closedAt) : "?"}</td>
         <td class="num">${m.count ?? 0}</td><td class="num">${fmt(m.cash)}</td><td class="num">${fmt(m.pos)}</td><td class="num">${fmt(m.cadeteTotal ?? m.farTotal)}</td><td class="num"><strong>${fmt(m.total)}</strong></td></tr>`; }).join("")}
       </tbody></table></div>` : `<p class="empty">Todavía no cerraste ningún turno.</p>`;
-  return `<div class="page">${top}<div class="card"><header><h3>Turnos cerrados</h3><span class="muted">Tocá uno para ver el cierre detallado</span></header>${hist}</div></div>`;
+  rest += `<div class="card"><header><h3>Turnos cerrados</h3><span class="muted">Tocá uno para ver el cierre detallado</span></header>${hist}</div>`;
+  return {top, notes, rest, shiftId: sh ? sh.id : ""};
 }
 
 function invStatus(i) {
@@ -1517,6 +1538,8 @@ function saveNotesNow() {
   if ((sh.notes || "") !== S.notesDraft) queue("update", "shifts/" + sh.id, {notes: S.notesDraft}, "Notas del turno");
   S.notesSavedAt = Date.now();
   const st = $("#notes-state"); if (st) { st.innerHTML = notesSavedHtml(); fx(st.querySelector(".tick"), "fx-tick"); }
+  clearTimeout(S.notesLabelTimer);
+  S.notesLabelTimer = setTimeout(() => { const el = $("#notes-state"); if (el && Date.now() - S.notesSavedAt >= 4900) el.textContent = "Se guardan solas · se borran al cerrar el turno"; }, 5000);
 }
 document.addEventListener("focusout", e => { if (e.target.id === "shiftnotes") { saveNotesNow(); S.notesDraft = null; } });
 
