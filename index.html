@@ -106,6 +106,16 @@ nav.tabs .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;p
 .syncbtn:hover{filter:brightness(.96)}
 .pill.envio{background:var(--accent-soft);color:var(--accent)}
 .tile.cadete{border-style:dashed;background:var(--sunk)}
+.savedbtn.late{border-color:var(--bad);background:var(--bad-soft)}
+.savedbtn.late .n{background:var(--bad)}
+.late-tag{display:inline-flex;align-items:center;gap:4px;color:var(--bad);font-size:12px;font-weight:700}
+.late-tag svg,.late-alert svg{width:15px;height:15px;flex:none}
+.late-alert{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border-radius:10px;background:var(--bad-soft);color:var(--ink);font-size:14px}
+.late-alert svg{color:var(--bad);margin-top:2px}
+.srow.late{border-color:var(--bad);box-shadow:inset 4px 0 0 var(--bad)}
+.age{font-weight:600;color:var(--ink)}
+.age.late{color:var(--bad)}
+.toast.warn{background:var(--warn);color:#fff}
 .notesbody{padding:12px 16px 16px}
 .notesbody textarea{min-height:96px;width:100%;resize:vertical}
 #printerpill .pill{border:0}
@@ -485,6 +495,11 @@ const isPending = s => s.status === "pending" && !s.cancelled;
 const isPaid = s => s.status !== "pending" && !s.cancelled;
 const currentShift = () => S.shifts.find(s => s.status === "open") || null;
 const shiftSales = id => S.sales.filter(s => s.shiftId === id).sort((a, b) => a.createdAt - b.createdAt);
+// Aviso de tickets guardados que llevan mucho tiempo sin cobrarse.
+const STALE_MIN = 30;
+const ageMs = s => Date.now() - (s.createdAt || Date.now());
+const isStale = s => isPending(s) && ageMs(s) >= STALE_MIN * 60000;
+const ageText = s => { const m = Math.max(0, Math.floor(ageMs(s) / 60000)); return m < 1 ? "recién" : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, "0")} min`; };
 const pendingTickets = () => { const sh = currentShift(); return sh ? shiftSales(sh.id).filter(isPending) : []; };
 const nextNum = sh => shiftSales(sh.id).reduce((m, s) => Math.max(m, Number(s.num) || 0), 0) + 1;
 const editingSale = () => S.editId ? S.sales.find(s => s.id === S.editId) : null;
@@ -731,6 +746,7 @@ function connectDb() {
   db.doc("config/ticket").onSnapshot(snap => { S.ticket = snap.exists ? {...snap.data()} : {}; done("ticket", snap.metadata.fromCache); }, onErr);
   db.doc("config/auth").onSnapshot(snap => { S.auth = snap.exists ? {...snap.data()} : null; done("auth", snap.metadata.fromCache); }, onErr);
   setInterval(() => { if ((S.view === "turno" || S.view === "ventas") && $("#modal").hidden) render(); }, 60000);
+  setInterval(checkStale, 30000);
   flush();
 }
 
@@ -819,7 +835,7 @@ function viewSell() {
   const pendN = pendingTickets().length;
   const toolbar = `<div class="toolbar">
       <label class="search"><input id="q" type="search" placeholder="Buscar producto…" value="${esc(S.q)}" aria-label="Buscar producto" autocomplete="off"></label>
-      <button class="savedbtn ${pendN ? "" : "zero"}" data-act="saved">Guardados <span class="n">${pendN}</span><kbd class="kbd-hint">F8</kbd></button>
+      ${(() => { const late = pendingTickets().filter(isStale).length; return `<button class="savedbtn ${pendN ? "" : "zero"} ${late ? "late" : ""}" data-act="saved" ${late ? `aria-label="Guardados: ${pendN}, ${late} con más de ${STALE_MIN} minutos sin cobrar"` : ""}>Guardados <span class="n">${pendN}</span>${late ? `<span class="late-tag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg>${late} +${STALE_MIN} min</span>` : ""}<kbd class="kbd-hint">F8</kbd></button>`; })()}
     </div>`;
   let catalog;
   if (!sh) {
@@ -892,7 +908,7 @@ function searchResults() {
 
 function payPill(s) {
   if (s.cancelled) return `<span class="pill bad plain">Anulada</span>`;
-  if (s.status === "pending") return `<span class="pill warn plain">Por cobrar</span>`;
+  if (s.status === "pending") return isStale(s) ? `<span class="pill bad plain" title="Lleva ${ageText(s)} sin cobrar">Por cobrar · ${ageText(s)}</span>` : `<span class="pill warn plain">Por cobrar</span>`;
   return `<span class="pill ${s.payment === "pos" ? "off" : "ok"} plain">${PAY[s.payment] || esc(s.payment)}</span>`;
 }
 function salesTable(sales) {
@@ -1081,7 +1097,22 @@ function openModal(title, body, opts = {}) {
 function closeModal() { const r = $("#modal"); r.hidden = true; r.innerHTML = ""; render(); }
 function toast(msg, kind) {
   const t = document.createElement("div"); t.className = "toast " + (kind || ""); t.textContent = msg;
-  $("#toast").appendChild(t); setTimeout(() => t.remove(), kind === "bad" ? 5000 : 2600);
+  $("#toast").appendChild(t); setTimeout(() => t.remove(), kind === "bad" || kind === "warn" ? 6000 : 2600);
+}
+
+// Cada 30 s: avisa una sola vez por ticket cuando pasa los 30 minutos y refresca la lista y el botón de Guardados.
+const staleWarned = new Set();
+function checkStale() {
+  if (S.status !== "ready" && S.status !== "slow") return;
+  const late = pendingTickets().filter(isStale);
+  const fresh = late.filter(s => !staleWarned.has(s.id));
+  fresh.forEach(s => staleWarned.add(s.id));
+  if (fresh.length && !S.phone) {
+    toast(fresh.length === 1 ? `Ticket #${fresh[0].num}${fresh[0].note ? " de " + fresh[0].note : ""} lleva ${ageText(fresh[0])} sin cobrar` : `${fresh.length} tickets llevan más de ${STALE_MIN} minutos sin cobrar`, "warn");
+    fxLater(() => fx(document.querySelector(".savedbtn"), "fx-bump"));
+  }
+  if (S.savedRefresh) S.savedRefresh();
+  else if (S.view === "vender" && $("#modal").hidden) { const b = document.querySelector(".savedbtn"); if (b) render(); }
 }
 
 /* ---------- Animaciones ---------- */
@@ -1206,11 +1237,14 @@ function openSaved() {
     const list = savedSorted();
     if (!list.length) return `<p class="empty">No hay tickets guardados. Usá “Guardar ticket” para dejar un pedido para cobrar después.</p>`;
     const total = list.reduce((t, s) => t + s.total, 0);
-    return `<p class="hint" style="margin:0">${plural(list.length, "ticket", "tickets")} · ${fmt(total)} por cobrar</p>
-      <div class="saved-list">${list.map(s => `<div class="srow">
+    const late = list.filter(isStale);
+    return `${late.length ? `<div class="late-alert" role="status"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg><span><strong>${plural(late.length, "ticket lleva", "tickets llevan")} más de ${STALE_MIN} minutos sin cobrar.</strong> ${late.length === 1 ? "Está marcado" : "Están marcados"} en rojo.</span></div>` : ""}
+      <p class="hint" style="margin:0">${plural(list.length, "ticket", "tickets")} · ${fmt(total)} por cobrar · se actualiza solo</p>
+      <div class="saved-list">${list.map(s => `<div class="srow ${isStale(s) ? "late" : ""}">
         <span class="num">#${s.num}</span>
         <div><div class="who">${s.note ? esc(s.note) : `<span class="muted">Sin nombre</span>`}${s.far ? ` <span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}${S.editId === s.id ? ` <span class="pill warn plain">Editando</span>` : ""}</div>
-          <div class="what">${hhmm(s.createdAt)} · ${itemsText(s.items)}</div>${orderMeta(s) ? `<div class="what">${orderMeta(s, {inline: true})}</div>` : ""}</div>
+          <div class="what"><span class="age ${isStale(s) ? "late" : ""}">${isStale(s) ? `Hace ${ageText(s)} sin cobrar` : `Hace ${ageText(s)}`}</span> · creado ${hhmm(s.createdAt)}</div>
+          <div class="what">${itemsText(s.items)}</div>${orderMeta(s) ? `<div class="what">${orderMeta(s, {inline: true})}</div>` : ""}</div>
         <span class="amt">${fmt(s.total)}</span>
         <div class="btns"><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`).join("")}</div>`;
@@ -1220,7 +1254,11 @@ function openSaved() {
       <label><input type="radio" name="ps" value="fecha" ${S.pendSort === "fecha" ? "checked" : ""}>Más antiguos</label>
       <label><input type="radio" name="ps" value="monto" ${S.pendSort === "monto" ? "checked" : ""}>Monto</label>
     </div><div id="savedrows" class="form">${rows()}</div>`,
-    {wide: true, onMount: d => d.querySelectorAll("input[name=ps]").forEach(r => r.addEventListener("change", () => { S.pendSort = r.value; d.querySelector("#savedrows").innerHTML = rows(); }))});
+    {wide: true, onMount: d => {
+      d.querySelectorAll("input[name=ps]").forEach(r => r.addEventListener("change", () => { S.pendSort = r.value; d.querySelector("#savedrows").innerHTML = rows(); }));
+      // Mientras la lista está abierta, el tiempo y las alertas se actualizan solos.
+      S.savedRefresh = () => { const box = d.querySelector("#savedrows"); if (box && document.body.contains(box)) box.innerHTML = rows(); else S.savedRefresh = null; };
+    }});
 }
 
 // Cobrar el pedido en pantalla (nuevo o editado), o un ticket guardado sin abrirlo.
