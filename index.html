@@ -98,6 +98,12 @@ nav.tabs .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;p
 .syncbtn{border:0;cursor:pointer;font:inherit;font-size:13px;font-weight:600}
 .syncbtn:hover{filter:brightness(.96)}
 .pill.envio{background:var(--accent-soft);color:var(--accent)}
+.tile.cadete{border-style:dashed;background:var(--sunk)}
+.notesbody{padding:12px 16px 16px}
+.notesbody textarea{min-height:96px;width:100%;resize:vertical}
+#printerpill .pill{border:0}
+@media (max-width:1440px){ #gearlabel{display:none} .gear{padding:0 10px} }
+.top .pill{white-space:nowrap}
 .onote{display:inline-block;margin-top:3px;padding:1px 7px;border-radius:6px;background:var(--warn-soft);color:var(--ink);font-size:13px;font-weight:600}
 .seg.compact label{padding:8px;font-size:15px}
 .tfoot textarea.text{min-height:48px}
@@ -358,6 +364,7 @@ body.phone .toast{text-align:center}
     <div class="brand" id="brand"><h1>Pietra</h1><small>Pizzería</small></div>
     <nav class="tabs" id="tabs" aria-label="Secciones"></nav>
     <span class="spacer"></span>
+    <span id="printerpill"></span>
     <span id="syncpill"></span>
     <span id="shiftpill"></span>
     <button class="gear" id="gearbtn" data-act="config" aria-label="Configuración"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span id="gearlabel">Configuración</span></button>
@@ -393,6 +400,9 @@ const UNITS = ["kg", "g", "L", "ml", "un"];
 const PAY = {efectivo: "Efectivo", pos: "POS"};
 const FAR_DEFAULT = 50; // Extra por envío lejano: se le paga al cadete, no se le cobra al cliente.
 const farFee = () => Number(S.settings.farFee) > 0 ? Number(S.settings.farFee) : FAR_DEFAULT;
+const CADETE_BASE_DEFAULT = 1000; // Monto fijo que cobra el cadete por turno.
+const cadeteBase = () => S.settings.cadeteBase != null && Number(S.settings.cadeteBase) >= 0 ? Number(S.settings.cadeteBase) : CADETE_BASE_DEFAULT;
+const shiftCadeteBase = sh => sh && sh.cadeteBase != null ? Number(sh.cadeteBase) : cadeteBase();
 
 /* ---------- Estado ---------- */
 const S = {
@@ -481,7 +491,8 @@ async function ensureCategory(name) {
 }
 const byName = (a, b) => (a.name || "").localeCompare(b.name || "", "es");
 
-function summarize(sales, opening) {
+// cadeteFijo: monto fijo del turno; si es null (por ejemplo, un día con varios turnos) no se calcula el pago al cadete.
+function summarize(sales, opening, cadeteFijo = null) {
   const ok = sales.filter(isPaid);
   const pend = sales.filter(isPending);
   const canc = sales.filter(s => s.cancelled);
@@ -502,6 +513,7 @@ function summarize(sales, opening) {
     pendingCount: pend.length, pendingTotal: sum(pend),
     cancelledCount: canc.length, cancelledTotal: sum(canc),
     farCount: far.length, farTotal: far.reduce((t, s) => t + (Number(s.farFee) || FAR_DEFAULT), 0),
+    cadeteBase: cadeteFijo, cadeteTotal: cadeteFijo == null ? null : cadeteFijo + far.reduce((t, s) => t + (Number(s.farFee) || FAR_DEFAULT), 0),
     products: Object.values(prod).sort((a, b) => b.qty - a.qty || b.total - a.total),
     opening: Number(opening) || 0, expectedCash: (Number(opening) || 0) + cash,
     avg: ok.length ? sum(ok) / ok.length : 0
@@ -604,7 +616,7 @@ function syncState() {
   if (!OB.net) return {cls: "bad", text: "Sin conexión"};
   if (n) return {cls: "warn", text: S.phone ? `Sincronizando ${n}…` : `Sincronizando ${plural(n, "cambio", "cambios")}…`};
   if (OB.failed.length) return {cls: "bad", text: plural(OB.failed.length, "cambio no se sincronizó", "cambios no se sincronizaron")};
-  return {cls: "ok", text: S.phone ? "Al día" : "Sincronizado"};
+  return {cls: "ok", text: "Al día"};
 }
 function renderSync() {
   const el = $("#syncpill"); if (!el) return;
@@ -711,7 +723,11 @@ function render() {
   const bn = $("#bottomnav");
   bn.innerHTML = S.phone ? viewsHere().map(([k, l]) => `<button data-act="nav" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ""}>${NAV_ICONS[k] || ""}<span>${l}</span>${k === "inventario" && low ? `<span class="dot">${low}</span>` : ""}</button>`).join("") : "";
   if (S.view === "config") $("#gearbtn").setAttribute("aria-current", "page"); else $("#gearbtn").removeAttribute("aria-current");
-  $("#gearlabel").innerHTML = S.printer ? `<span class="prtdot" title="Impresora conectada"></span>` : "Configuración";
+  $("#gearlabel").textContent = "Configuración";
+  const bt = !!(navigator.bluetooth && navigator.bluetooth.requestDevice);
+  $("#printerpill").innerHTML = S.phone || !bt || S.status === "loading" ? ""
+    : S.printer ? `<button class="pill ok syncbtn" data-act="printer-menu" title="Impresora conectada: ${esc(S.printer.name)}">Impresora conectada</button>`
+    : `<button class="pill off syncbtn" data-act="printer-connect" title="Tocá para conectar la impresora">${S.printerBusy ? "Conectando…" : "Impresora desconectada"}</button>`;
   $("#tabs").innerHTML = viewsHere().map(([k, l]) => `<button data-act="nav" data-view="${k}" ${S.view === k ? 'aria-current="page"' : ""}>${l}${k === "inventario" && low ? `<span class="dot" aria-label="${low} insumos con stock bajo">${low}</span>` : ""}</button>`).join("");
   const sh = currentShift();
   $("#shiftpill").innerHTML = S.status === "ready" || S.status === "slow"
@@ -869,7 +885,8 @@ function tilesHtml(sum, withCash) {
     <div class="tile"><span>POS</span><strong>${fmt(sum.pos)}</strong><small>${plural(sum.posCount, "venta", "ventas")}</small></div>
     ${sum.pendingCount ? `<div class="tile"><span>Por cobrar</span><strong>${fmt(sum.pendingTotal)}</strong><small>${plural(sum.pendingCount, "ticket guardado", "tickets guardados")}</small></div>` : ""}
     ${withCash ? `<div class="tile"><span>Efectivo esperado en caja</span><strong>${fmt(sum.expectedCash)}</strong><small>Fondo ${fmt(sum.opening)} + efectivo</small></div>` : ""}
-    ${withCash || farCount ? `<div class="tile"><span>Pagar al cadete</span><strong>${fmt(farTotal)}</strong><small>${plural(farCount, "envío lejano", "envíos lejanos")} × ${fmt(farFee())}${withCash && farTotal ? ` · en caja quedan ${fmt(sum.expectedCash - farTotal)}` : ""}</small></div>` : ""}
+    ${sum.cadeteTotal != null ? `<div class="tile cadete"><span>Pagar al cadete</span><strong>${fmt(sum.cadeteTotal)}</strong><small>Fijo ${fmt(sum.cadeteBase)} + ${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)}) · aparte de las ventas</small></div>`
+      : farCount ? `<div class="tile cadete"><span>Envíos lejanos</span><strong>${farCount}</strong><small>${fmt(farTotal)} para el cadete, aparte de las ventas</small></div>` : ""}
     ${sum.cancelledCount ? `<div class="tile"><span>Anuladas</span><strong>${sum.cancelledCount}</strong><small>${fmt(sum.cancelledTotal)} no cobrados</small></div>` : ""}
   </div>`;
 }
@@ -928,11 +945,13 @@ function viewShift() {
   let top;
   if (sh) {
     const sales = shiftSales(sh.id);
-    const sum = summarize(sales, sh.openingCash);
+    const sum = summarize(sales, sh.openingCash, shiftCadeteBase(sh));
     top = `<div class="page-head"><h2>Turno abierto</h2><span class="pill ok">Desde las ${hhmm(sh.openedAt)} · ${dur(Date.now() - sh.openedAt)}</span><span class="spacer"></span>
         ${S.phone ? "" : `<button class="btn primary" data-act="close-shift">Cerrar turno</button>`}</div>
       ${S.phone ? `<p class="pcnote">Estás viendo el turno en vivo. Se cierra desde la PC de la caja.</p>` : ""}
       ${tilesHtml(sum, true)}
+      <div class="card"><header><h3>Notas del turno</h3><span class="muted" id="notes-state">${S.notesSaving ? "Guardando…" : "Se borran al cerrar el turno"}</span></header>
+        <div class="body notesbody"><textarea id="shiftnotes" class="text" rows="4" placeholder="Ej.: faltó cambio de $100, avisar a Juan que mañana entra 18 h, pedido grande para el sábado…">${esc(S.notesDraft != null && S.notesDraftId === sh.id ? S.notesDraft : (sh.notes || ""))}</textarea></div></div>
       <div class="two">
         <div class="card"><header><h3>Productos vendidos</h3></header>${productsTable(sum.products)}</div>
         <div class="card"><header><h3>Ventas del turno</h3></header>${salesTable(sales.slice().reverse())}</div>
@@ -947,12 +966,12 @@ function viewShift() {
   }
   const hist = closed.length && S.phone ? `<div class="mlist">${closed.map(s => { const m = s.summary || {}; return `<div class="mrow" data-act="shift-detail" data-id="${s.id}" role="button" tabindex="0">
       <div class="mr-top"><strong>${shortDate(s.openedAt)}</strong><span class="muted">${hhmm(s.openedAt)} a ${s.closedAt ? hhmm(s.closedAt) : "?"}</span><span class="sp"></span><span class="amt">${fmt(m.total)}</span></div>
-      <div class="mr-sub">${plural(m.count ?? 0, "venta", "ventas")} · Efectivo ${fmt(m.cash)} · POS ${fmt(m.pos)}${m.farTotal ? ` · Cadete ${fmt(m.farTotal)}` : ""}</div>
+      <div class="mr-sub">${plural(m.count ?? 0, "venta", "ventas")} · Efectivo ${fmt(m.cash)} · POS ${fmt(m.pos)}${(m.cadeteTotal ?? m.farTotal) ? ` · Cadete ${fmt(m.cadeteTotal ?? m.farTotal)}` : ""}</div>
     </div>`; }).join("")}</div>`
     : closed.length ? `<div class="tablewrap"><table><thead><tr><th>Fecha</th><th>Horario</th><th class="num">Ventas</th><th class="num">Efectivo</th><th class="num">POS</th><th class="num">Cadete</th><th class="num">Total</th></tr></thead><tbody>
       ${closed.map(s => { const m = s.summary || {}; return `<tr class="click" data-act="shift-detail" data-id="${s.id}" tabindex="0">
         <td>${shortDate(s.openedAt)}</td><td>${hhmm(s.openedAt)} a ${s.closedAt ? hhmm(s.closedAt) : "?"}</td>
-        <td class="num">${m.count ?? 0}</td><td class="num">${fmt(m.cash)}</td><td class="num">${fmt(m.pos)}</td><td class="num">${fmt(m.farTotal)}</td><td class="num"><strong>${fmt(m.total)}</strong></td></tr>`; }).join("")}
+        <td class="num">${m.count ?? 0}</td><td class="num">${fmt(m.cash)}</td><td class="num">${fmt(m.pos)}</td><td class="num">${fmt(m.cadeteTotal ?? m.farTotal)}</td><td class="num"><strong>${fmt(m.total)}</strong></td></tr>`; }).join("")}
       </tbody></table></div>` : `<p class="empty">Todavía no cerraste ningún turno.</p>`;
   return `<div class="page">${top}<div class="card"><header><h3>Turnos cerrados</h3><span class="muted">Tocá uno para ver el cierre detallado</span></header>${hist}</div></div>`;
 }
@@ -1294,7 +1313,7 @@ async function openShift() {
   if (currentShift() || S.busy) return;
   S.busy = true;
   const cash = Number(S.openCash) || 0;
-  const ok = queue("set", "shifts/" + newId("shifts"), {status: "open", openedAt: Date.now(), openingCash: cash}, `Turno abierto (fondo ${fmt(cash)})`); toast("Turno abierto");
+  const ok = queue("set", "shifts/" + newId("shifts"), {status: "open", openedAt: Date.now(), openingCash: cash, cadeteBase: cadeteBase(), notes: ""}, `Turno abierto (fondo ${fmt(cash)})`); toast("Turno abierto");
   S.busy = false;
   if (ok) S.openCash = "";
 }
@@ -1308,7 +1327,7 @@ function closeShiftDialog() {
     return;
   }
   const sales = shiftSales(sh.id);
-  const sum = summarize(sales, sh.openingCash);
+  const sum = summarize(sales, sh.openingCash, shiftCadeteBase(sh));
   const pend = sales.filter(isPending);
   openModal("Cerrar turno", `<p class="hint" style="margin:0">Turno de ${hhmm(sh.openedAt)} a ${hhmm(Date.now())} · ${dur(Date.now() - sh.openedAt)}</p>
     ${pend.length ? `<div class="card"><header><h3>${plural(pend.length, "ticket sin cobrar", "tickets sin cobrar")}</h3><span class="muted">Cobralos o anulalos antes de cerrar</span></header>${salesTable(pend)}</div>` : ""}
@@ -1331,20 +1350,26 @@ function closeShiftDialog() {
 }
 async function doCloseShift(sh, sales, sum, counted, btn) {
   if (S.busy || sales.some(isPending)) return; S.busy = true; btn.disabled = true; btn.textContent = "Cerrando…";
+  saveNotesNow();
+  const notes = (S.notesDraftId === sh.id && S.notesDraft != null ? S.notesDraft : (sh.notes || "")).trim();
   const clean = sales.map(s => ({...s}));
   const closedAt = Date.now();
   let ok = await save(() => S.db.doc("shiftSales/" + sh.id).set({shiftId: sh.id, sales: clean}));
-  if (ok) ok = await save(() => S.db.doc("shifts/" + sh.id).update({status: "closed", closedAt, summary: sum, countedCash: counted}));
+  // Las notas del turno se borran al cerrar; solo quedan impresas en el ticket de cierre.
+  if (ok) ok = await save(() => S.db.doc("shifts/" + sh.id).update({status: "closed", closedAt, summary: sum, countedCash: counted, notes: ""}));
   S.busy = false;
   if (!ok) { btn.disabled = false; btn.textContent = "Cerrar turno"; return; }
   S.histCache[sh.id] = clean; resetCart();
+  S.notesDraft = null; S.notesDraftId = null;
   OB.recent = []; recompute();
+  const closedShift = {...sh, status: "closed", closedAt, summary: sum, countedCash: counted, notes: ""};
+  if (S.printer) printClosing(closedShift, clean, notes).then(ok => { if (ok) toast("Ticket de cierre impreso"); });
   for (const s of sales) { try { await S.db.doc("sales/" + s.id).delete(); } catch (e) {} }
   toast("Turno cerrado");
-  showShiftDetail({...sh, status: "closed", closedAt, summary: sum, countedCash: counted});
+  showShiftDetail(closedShift, notes);
 }
 
-function showShiftDetail(sh) {
+function showShiftDetail(sh, notesAtClose = "") {
   const sum = sh.summary || summarize([], 0);
   const counted = sh.countedCash;
   const diff = counted == null ? null : counted - sum.expectedCash;
@@ -1355,8 +1380,33 @@ function showShiftDetail(sh) {
     ${counted != null ? `<div class="paybig ${Math.round(diff) < 0 ? "short" : "change"}"><span>Contado en caja ${fmt(counted)} · ${Math.round(diff) === 0 ? "caja exacta" : diff < 0 ? "faltó" : "sobró"}</span><strong>${Math.round(diff) === 0 ? fmt(0) : (diff < 0 ? "− " : "+ ") + fmt(Math.abs(diff))}</strong></div>` : ""}
     <div class="card"><header><h3>Productos vendidos</h3></header>${productsTable(sum.products || [])}</div>
     <div class="card"><header><h3>Todas las ventas</h3></header><div id="shift-detail-sales" data-id="${sh.id}">${sales ? salesTable(sales) : `<p class="empty">Cargando ventas…</p>`}</div></div>
-    <div class="actions end"><button class="btn dark" data-act="close-modal">Listo</button></div>`, {wide: true});
+    ${S.phone ? "" : `<p class="hint" style="margin:0">${S.printer ? "Podés imprimir el ticket de cierre cuantas veces quieras." : "Para imprimir el ticket de cierre, conectá la impresora (arriba, en el estado de la impresora)."}</p>`}
+    <div class="actions end">${S.phone ? "" : `<button class="btn" id="print-closing" ${S.printer ? "" : "disabled"}>Imprimir cierre</button>`}<button class="btn dark" data-act="close-modal">Listo</button></div>`,
+    {wide: true, onMount: d => { const b = d.querySelector("#print-closing"); if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = "Imprimiendo…";
+      const list = S.histCache[sh.id]; if (!list) await loadShiftSales(sh.id);
+      const ok = await printClosing(sh, S.histCache[sh.id] || [], notesAtClose);
+      b.disabled = false; b.textContent = "Imprimir cierre"; if (ok) toast("Ticket de cierre impreso");
+    }; }});
 }
+
+// Notas del turno: se guardan solas mientras escribís (también sin conexión) y se vacían al cerrar el turno.
+let notesTimer = null;
+function onNotesInput(v) {
+  const sh = currentShift(); if (!sh) return;
+  S.notesDraft = v; S.notesDraftId = sh.id;
+  const st = $("#notes-state"); if (st) st.textContent = "Guardando…";
+  clearTimeout(notesTimer);
+  notesTimer = setTimeout(() => saveNotesNow(), 700);
+}
+function saveNotesNow() {
+  clearTimeout(notesTimer); notesTimer = null;
+  const sh = currentShift();
+  if (!sh || S.notesDraftId !== sh.id || S.notesDraft == null) return;
+  if ((sh.notes || "") !== S.notesDraft) queue("update", "shifts/" + sh.id, {notes: S.notesDraft}, "Notas del turno");
+  const st = $("#notes-state"); if (st) st.textContent = "Guardado · se borran al cerrar el turno";
+}
+document.addEventListener("focusout", e => { if (e.target.id === "shiftnotes") { saveNotesNow(); S.notesDraft = null; } });
 
 /* ---------- Inventario ---------- */
 function openInvEdit(id) {
@@ -1551,6 +1601,11 @@ const A = {
   config: () => openConfig(),
   logout: () => { if (OB.ops.length && !confirmLogout()) return; AUTH.signOut().finally(() => location.reload()); },
   "app-update": () => location.reload(),
+  "printer-connect": async () => { if (S.printerBusy) return; S.printerBusy = true; printerMsg = ""; render(); await connectPrinter(); S.printerBusy = false; render(); mountPrinter(); if (printerMsg) toast(printerMsg.replace(/<[^>]+>/g, ""), "bad"); },
+  "printer-menu": () => openModal("Impresora", `<div class="statusline"><span class="pill ok">Conectada: ${esc(S.printer ? S.printer.name : "")}</span></div>
+      <div class="actions end"><button class="btn ghost" data-act="printer-off">Desconectar</button><button class="btn" id="ptest">Imprimir prueba</button></div>`,
+      {onMount: d => d.querySelector("#ptest").onclick = () => printSale(sampleSale())}),
+  "printer-off": () => { try { S.printer.dev.gatt.disconnect(); } catch (e) {} S.printer = null; closeModal(); mountPrinter(); },
   "cfg-lock": () => { leaveConfig(); S.view = "vender"; render(); toast("Configuración bloqueada"); },
   "ticket-view": el => openTicketView(el.dataset.id),
   "charge-cart": () => openCharge(null),
@@ -1596,6 +1651,7 @@ document.addEventListener("keydown", e => {
 });
 document.addEventListener("input", e => {
   if (e.target.id === "note") S.note = e.target.value;
+  if (e.target.id === "shiftnotes") onNotesInput(e.target.value);
   if (e.target.id === "addr") S.addr = e.target.value;
   if (e.target.id === "onote") S.onote = e.target.value;
   if (e.target.id === "q") { S.q = e.target.value; render(); }
@@ -1720,7 +1776,9 @@ function viewConfig() {
 
       <div class="card"><header><h3>Local</h3></header><div class="body">
         <label class="field"><span>Nombre que aparece arriba a la izquierda</span><input id="c-name" class="text" value="${esc(st.businessName || "")}" placeholder="Pietra"></label>
-        <label class="field"><span>Monto del envío lejano para el cadete ($)</span><input id="c-far" class="text" type="number" min="1" step="1" value="${farFee()}"></label>
+        <label class="field"><span>Monto fijo del cadete por turno ($)</span><input id="c-cadete" class="text" type="number" min="0" step="1" value="${cadeteBase()}"></label>
+        <label class="field"><span>Extra por cada envío lejano ($)</span><input id="c-far" class="text" type="number" min="1" step="1" value="${farFee()}"></label>
+        <p class="hint" style="margin:0">El pago al cadete se calcula aparte: no se suma ni se resta de las ventas. Un cambio se aplica desde el próximo turno.</p>
         <div class="actions end"><button class="btn primary" id="c-save-local">Guardar</button></div>
       </div></div>
 
@@ -1780,7 +1838,9 @@ function mountConfig() {
   m.querySelector("#c-save-local").onclick = async () => {
     const far = Math.round(Number(m.querySelector("#c-far").value));
     if (!(far > 0)) { toast("Poné un monto de envío lejano mayor que 0.", "bad"); return; }
-    const ok = await setSetting({businessName: m.querySelector("#c-name").value.trim(), farFee: far});
+    const cad = Math.round(Number(m.querySelector("#c-cadete").value));
+    if (!(cad >= 0)) { toast("Poné un monto fijo del cadete válido (0 o más).", "bad"); return; }
+    const ok = await setSetting({businessName: m.querySelector("#c-name").value.trim(), farFee: far, cadeteBase: cad});
     if (ok) toast("Datos del local guardados");
   };
   m.querySelector("#c-save-auth").onclick = async () => {
@@ -1988,8 +2048,8 @@ function logoRaster(dataUrl, dots) {
     img.src = dataUrl;
   });
 }
-async function escposFor(sale, T) {
-  const {L} = receiptLines(sale, T);
+async function escposFor(sale, T) { return escposLines(receiptLines(sale, T).L, T); }
+async function escposLines(L, T) {
   const dots = (Number(T.paper) || 58) === 80 ? 576 : 384;
   const b = [0x1B, 0x40, 0x1B, 0x74, 0x02];
   if (T.logo) { b.push(0x1B, 0x61, 0x01); b.push(...await logoRaster(T.logo, dots)); }
@@ -2000,10 +2060,11 @@ async function escposFor(sale, T) {
   b.push(0x1B, 0x61, 0, 0x1D, 0x21, 0, 0x1B, 0x45, 0, 0x1B, 0x64, 0x04, 0x1D, 0x56, 0x42, 0x00);
   return new Uint8Array(b);
 }
-async function printSale(sale, T) {
+async function printSale(sale, T) { return printBytes(() => escposFor(sale, T || S.ticket)); }
+async function printBytes(make) {
   if (!S.printer) { toast("No hay impresora conectada.", "bad"); return false; }
   try {
-    const bytes = await escposFor(sale, T || S.ticket);
+    const bytes = await make();
     const ch = S.printer.ch, size = 180;
     for (let i = 0; i < bytes.length; i += size) {
       const part = bytes.slice(i, i + size);
@@ -2015,6 +2076,47 @@ async function printSale(sale, T) {
   } catch (e) { toast("No se pudo imprimir. Revisá que la impresora siga prendida y conectada.", "bad"); return false; }
 }
 function autoPrint(sale) { if (sale && S.printer && S.ticket.autoPrint) printSale(sale); }
+
+// Ticket de cierre de turno: resumen de ventas, cobros, caja, cadete, productos y notas.
+function closingLines(sh, sales, notes, T) {
+  const W = (Number(T.paper) || 58) === 80 ? 48 : 32;
+  const m = sh.summary || summarize(sales || [], sh.openingCash, shiftCadeteBase(sh));
+  const L = [], hr = () => L.push({t: "-".repeat(W)}), row = (a, b, o = {}) => L.push({t: pair(a, b, W), ...o});
+  const head = String(T.header ?? "Pizzería Pietra").split("\n").filter(x => x.trim());
+  if (head.length) wrapText(head[0].trim(), Math.floor(W / 2)).forEach(t => L.push({t, c: true, b: true, big: true}));
+  hr(); L.push({t: "CIERRE DE TURNO", c: true, b: true, big: true});
+  const d1 = new Date(sh.openedAt), d2 = new Date(sh.closedAt || Date.now());
+  L.push({t: `${pad(d1.getDate())}/${pad(d1.getMonth() + 1)}/${d1.getFullYear()}`, c: true});
+  L.push({t: `${hhmm(d1.getTime())} a ${hhmm(d2.getTime())}`, c: true});
+  hr();
+  L.push({t: pair("TOTAL", money(m.total), Math.floor(W / 2)), b: true, big: true});
+  row("Ventas cobradas", String(m.count || 0));
+  if (m.count) row("Ticket promedio", money(m.avg));
+  row(`Efectivo (${m.cashCount || 0})`, money(m.cash));
+  row(`POS (${m.posCount || 0})`, money(m.pos));
+  if (m.cancelledCount) row(`Anuladas (${m.cancelledCount})`, money(m.cancelledTotal));
+  hr(); L.push({t: "CAJA", b: true});
+  row("Fondo inicial", money(m.opening));
+  row("Efectivo esperado", money(m.expectedCash), {b: true});
+  if (sh.countedCash != null) {
+    const diff = sh.countedCash - m.expectedCash;
+    row("Contado", money(sh.countedCash));
+    row(Math.round(diff) === 0 ? "Diferencia" : diff < 0 ? "Faltante" : "Sobrante", money(Math.abs(diff)), {b: true});
+  }
+  hr(); L.push({t: "CADETE", b: true});
+  const base = m.cadeteBase != null ? m.cadeteBase : shiftCadeteBase(sh);
+  row("Fijo del turno", money(base));
+  row(`Envíos lejanos (${m.farCount || 0})`, money(m.farTotal));
+  row("A pagar", money(m.cadeteTotal != null ? m.cadeteTotal : base + (m.farTotal || 0)), {b: true});
+  if ((m.products || []).length) {
+    hr(); L.push({t: "PRODUCTOS", b: true});
+    m.products.forEach(p => { const right = money(p.total); wrapText(`${p.qty} x ${p.name}`, W - right.length - 1).forEach((t, i) => L.push({t: i === 0 ? pair(t, right, W) : "    " + t})); });
+  }
+  if (notes && notes.trim()) { hr(); L.push({t: "NOTAS DEL TURNO", b: true}); wrapText(notes.trim(), W).forEach(t => L.push({t})); }
+  hr(); L.push({t: "Impreso " + hhmm(Date.now()), c: true});
+  return L;
+}
+function printClosing(sh, sales, notes) { const T = {...S.ticket, logo: ""}; return printBytes(() => escposLines(closingLines(sh, sales, notes, T), T)); }
 
 /* ---------- Firebase: configuración, inicio de sesión y base de datos ---------- */
 // Datos del proyecto de Firebase (Configuración del proyecto → Tus apps). No son secretos: el acceso lo controlan
