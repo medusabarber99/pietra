@@ -108,6 +108,10 @@ nav.tabs .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;p
 .syncbtn:hover{filter:brightness(.96)}
 .pill.envio{background:var(--accent-soft);color:var(--accent)}
 .tile.cadete{border-style:dashed;background:var(--sunk)}
+.pill.tip{background:var(--sunk);color:var(--ink);border:1px dashed var(--line)}
+.tipfield{border:1px dashed var(--line);border-radius:10px;padding:10px 12px;background:var(--sunk)}
+tr.totrow td{border-top:2px solid var(--line)}
+.supplier{font-size:13px;color:var(--muted);margin-top:2px}
 .savedbtn.late{border-color:var(--bad);background:var(--bad-soft)}
 .savedbtn.late .n{background:var(--bad)}
 .late-tag{display:inline-flex;align-items:center;gap:4px;color:var(--bad);font-size:12px;font-weight:700}
@@ -574,7 +578,9 @@ function summarize(sales, opening, cadeteFijo = null) {
     pendingCount: pend.length, pendingTotal: sum(pend),
     cancelledCount: canc.length, cancelledTotal: sum(canc),
     farCount: far.length, farTotal: far.reduce((t, s) => t + (Number(s.farFee) || FAR_DEFAULT), 0),
-    cadeteBase: cadeteFijo, cadeteTotal: cadeteFijo == null ? null : cadeteFijo + far.reduce((t, s) => t + (Number(s.farFee) || FAR_DEFAULT), 0),
+    // Propina del delivery con tarjeta: un valor por pedido cobrado (tipCard). No cambia total, efectivo ni POS; va al cadete.
+    tipCount: ok.filter(s => Number(s.tipCard) > 0).length, tipTotal: ok.reduce((t, s) => t + (Number(s.tipCard) > 0 ? Math.round(Number(s.tipCard)) : 0), 0),
+    cadeteBase: cadeteFijo, cadeteTotal: cadeteFijo == null ? null : cadeteFijo + far.reduce((t, s) => t + (Number(s.farFee) || FAR_DEFAULT), 0) + ok.reduce((t, s) => t + (Number(s.tipCard) > 0 ? Math.round(Number(s.tipCard)) : 0), 0),
     products: Object.values(prod).sort((a, b) => b.qty - a.qty || b.total - a.total),
     opening: Number(opening) || 0, expectedCash: (Number(opening) || 0) + cash,
     avg: ok.length ? sum(ok) / ok.length : 0
@@ -915,7 +921,7 @@ function searchResults() {
 function payPill(s) {
   if (s.cancelled) return `<span class="pill bad plain">Anulada</span>`;
   if (s.status === "pending") return isStale(s) ? `<span class="pill bad plain" title="Lleva ${ageText(s)} sin cobrar">Por cobrar · ${ageText(s)}</span>` : `<span class="pill warn plain">Por cobrar</span>`;
-  return `<span class="pill ${s.payment === "pos" ? "off" : "ok"} plain">${PAY[s.payment] || esc(s.payment)}</span>`;
+  return `<span class="pill ${s.payment === "pos" ? "off" : "ok"} plain">${PAY[s.payment] || esc(s.payment)}</span>${Number(s.tipCard) > 0 ? ` <span class="pill tip plain" title="Propina del delivery con tarjeta, para el cadete">Propina ${fmt(s.tipCard)}</span>` : ""}`;
 }
 function salesTable(sales) {
   // Las acciones (Cobrar, Anular) solo aparecen para ventas del turno abierto.
@@ -948,12 +954,24 @@ function tilesHtml(sum, withCash) {
     <div class="tile"><span>POS</span><strong>${fmt(sum.pos)}</strong><small>${plural(sum.posCount, "venta", "ventas")}</small></div>
     ${sum.pendingCount ? `<div class="tile"><span>Por cobrar</span><strong>${fmt(sum.pendingTotal)}</strong><small>${plural(sum.pendingCount, "ticket guardado", "tickets guardados")}</small></div>` : ""}
     ${withCash ? `<div class="tile"><span>Efectivo esperado en caja</span><strong>${fmt(sum.expectedCash)}</strong><small>Fondo ${fmt(sum.opening)} + efectivo</small></div>` : ""}
-    ${sum.cadeteTotal != null ? `<div class="tile cadete"><span>Pagar al cadete</span><strong>${fmt(sum.cadeteTotal)}</strong><small>Fijo ${fmt(sum.cadeteBase)} + ${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)}) · aparte de las ventas</small></div>`
-      : farCount ? `<div class="tile cadete"><span>Envíos lejanos</span><strong>${farCount}</strong><small>${fmt(farTotal)} para el cadete, aparte de las ventas</small></div>` : ""}
+    ${sum.cadeteTotal != null ? `<div class="tile cadete"><span>Pagar al cadete</span><strong>${fmt(sum.cadeteTotal)}</strong><small>Fijo ${fmt(sum.cadeteBase)} + ${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>`
+      : farCount || sum.tipTotal ? `<div class="tile cadete"><span>Para el cadete</span><strong>${fmt(farTotal + (sum.tipTotal || 0))}</strong><small>${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>` : ""}
     ${sum.cancelledCount ? `<div class="tile"><span>Anuladas</span><strong>${sum.cancelledCount}</strong><small>${fmt(sum.cancelledTotal)} no cobrados</small></div>` : ""}
   </div>`;
 }
 
+// Desglose del pago al cadete: fijo, envíos lejanos, propinas con tarjeta y total.
+function cadeteBreakdownHtml(sum, sh) {
+  const base = sum.cadeteBase != null ? sum.cadeteBase : shiftCadeteBase(sh);
+  const total = sum.cadeteTotal != null ? sum.cadeteTotal : base + (sum.farTotal || 0) + (sum.tipTotal || 0);
+  return `<div class="card"><header><h3>Pago al cadete</h3><span class="muted">Aparte de las ventas: no suma ni resta del total</span></header>
+    <div class="tablewrap"><table><tbody>
+      <tr><td>Monto fijo del turno</td><td class="num">${fmt(base)}</td></tr>
+      <tr><td>Envíos lejanos (${sum.farCount || 0} × ${fmt(farFee())})</td><td class="num">${fmt(sum.farTotal)}</td></tr>
+      <tr><td>Propinas del delivery con tarjeta (${sum.tipCount || 0})</td><td class="num">${fmt(sum.tipTotal || 0)}</td></tr>
+      <tr class="totrow"><td><strong>Total a pagar al cadete</strong></td><td class="num"><strong>${fmt(total)}</strong></td></tr>
+    </tbody></table></div></div>`;
+}
 function productsTable(products) {
   if (!products.length) return `<p class="empty">Sin productos vendidos.</p>`;
   return `<div class="tablewrap"><table><thead><tr><th>Producto</th><th class="num">Cant.</th><th class="num">Importe</th></tr></thead><tbody>
@@ -1075,11 +1093,12 @@ function viewInv() {
     <div class="card">${items.length && S.phone ? `<div class="mlist">${items.map(i => `<div class="mrow">
         <div class="mr-top"><strong>${esc(i.name)}</strong>${invStatus(i)}<span class="sp"></span><span class="amt">${qfmt(i.stock)} ${esc(i.unit)}</span></div>
         <div class="mr-sub">Mínimo ${qfmt(i.min)} ${esc(i.unit)}</div>
+        ${i.supplier ? `<div class="mr-sub supplier">Distribuidor: <strong>${esc(i.supplier)}</strong></div>` : ""}
         <div class="mr-btns"><button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="in">+ Entrada</button><button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="out">− Salida</button><button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="set">Ajustar</button><button class="btn sm ghost" data-act="inv-edit" data-id="${i.id}">Editar</button></div>
       </div>`).join("")}</div>`
       : items.length ? `<div class="tablewrap"><table><thead><tr><th>Insumo</th><th>Estado</th><th class="num">Stock</th><th class="num">Mínimo</th><th class="num">Movimiento</th><th></th></tr></thead><tbody>
       ${items.map(i => `<tr>
-        <td><strong>${esc(i.name)}</strong></td><td>${invStatus(i)}</td>
+        <td><strong>${esc(i.name)}</strong>${i.supplier ? `<div class="supplier">Distribuidor: ${esc(i.supplier)}</div>` : ""}</td><td>${invStatus(i)}</td>
         <td class="num"><strong>${qfmt(i.stock)}</strong> ${esc(i.unit)}</td><td class="num muted">${qfmt(i.min)} ${esc(i.unit)}</td>
         <td class="num"><button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="in">+ Entrada</button> <button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="out">− Salida</button> <button class="btn sm" data-act="inv-move" data-id="${i.id}" data-t="set">Ajustar</button></td>
         <td class="num"><button class="btn sm ghost" data-act="inv-edit" data-id="${i.id}">Editar</button></td></tr>`).join("")}
@@ -1309,6 +1328,9 @@ function openCharge(saleId) {
       <div class="paybig change" id="chg"><span>Vuelto</span><strong>${fmt(0)}</strong></div>
     </div>
     <p class="hint" id="poshint" hidden>Cobrá en el POS y confirmá cuando la operación esté aprobada.</p>
+    ${s || ed ? `<label class="field tipfield"><span>Propina del delivery con tarjeta ($) · opcional</span>
+      <input id="tipcard" type="number" min="0" step="1" inputmode="numeric" placeholder="0" value="${Number((s || ed).tipCard) > 0 ? Math.round(Number((s || ed).tipCard)) : ""}">
+      <small class="muted">Es para el cadete: no cambia el total de la venta ni el efectivo o POS.</small></label>` : ""}
     <p class="hint shortcuts" style="margin:0"><span><kbd>E</kbd> efectivo</span><span><kbd>P</kbd> POS</span><span><kbd>Enter</kbd> confirmar</span></p>
     <div class="actions end"><button class="btn ghost" data-act="close-modal">Volver</button><button class="btn primary lg" id="payok">Confirmar cobro</button></div>`,
     {onMount: d => {
@@ -1328,6 +1350,7 @@ function openCharge(saleId) {
       d.querySelectorAll("input[name=pm]").forEach(r => r.addEventListener("change", () => setM(r.value)));
       d.addEventListener("keydown", e => {
         if (e.target === inp) { if (e.key === "Enter" && !ok.disabled) { e.preventDefault(); ok.click(); } if (e.key.toLowerCase() === "p") { e.preventDefault(); setM("pos"); } return; }
+        if (e.target.id === "tipcard") { if (e.key === "Enter" && !ok.disabled) { e.preventDefault(); ok.click(); } return; }
         if (e.key.toLowerCase() === "e") { e.preventDefault(); setM("efectivo"); }
         else if (e.key.toLowerCase() === "p") { e.preventDefault(); setM("pos"); }
         else if (e.key === "Enter" && e.target.tagName !== "BUTTON" && !ok.disabled) { e.preventDefault(); ok.click(); }
@@ -1337,13 +1360,14 @@ function openCharge(saleId) {
       ok.onclick = () => {
         const m = method();
         const recv = m === "efectivo" ? (inp.value === "" ? total : Number(inp.value)) : null;
-        s ? chargeTicket(s, m, recv, ok) : chargeCart(m, recv, ok);
+        const tf = d.querySelector("#tipcard"), tip = tf ? Math.max(0, Math.round(Number(tf.value) || 0)) : null;
+        s ? chargeTicket(s, m, recv, ok, tip) : chargeCart(m, recv, ok, tip);
       };
       upd();
     }});
 }
 
-async function chargeCart(payment, received, btn) {
+async function chargeCart(payment, received, btn, tip = null) {
   if (S.busy) return; S.busy = true; btn.disabled = true;
   const ed = editingSale();
   let ok, num, total = cartTotal(), change = payment === "efectivo" ? Math.max(0, (received ?? total) - total) : null;
@@ -1351,32 +1375,33 @@ async function chargeCart(payment, received, btn) {
   const fields = cartFields(), paidAt = Date.now();
   if (ed) {
     num = ed.num;
-    ok = queue("update", "sales/" + ed.id, {...fields, status: "paid", payment, paidAt, received: payment === "efectivo" ? received : null, change}, `Ticket #${ed.num} cobrado (${PAY[payment]} ${fmt(total)})`);
+    // tipCard se guarda como valor del pedido (se reemplaza, no se suma): no se cuenta dos veces.
+    ok = queue("update", "sales/" + ed.id, {...fields, status: "paid", payment, paidAt, received: payment === "efectivo" ? received : null, change, tipCard: tip || 0}, `Ticket #${ed.num} cobrado (${PAY[payment]} ${fmt(total)})`);
   } else {
     const sale = newSale("paid", payment, received), id = newId("sales"); num = sale.num; S._lastSale = {...sale, id};
     ok = queue("set", "sales/" + id, sale, `Venta #${sale.num} cobrada (${PAY[payment]} ${fmt(total)})`);
   }
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
-  const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change} : null;
+  const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change, tipCard: tip || 0} : null;
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
   // Ticket guardado que se cobra: 2.ª copia, Comprobante de pago. Venta directa: según "imprimir al cobrar".
   if (printed) printCopy(printed, "paid"); else autoPrint(S._lastSale);
-  toast(`${ed ? "Ticket" : "Venta"} #${num} cobrado · ${fmt(total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : ""));
+  toast(`${ed ? "Ticket" : "Venta"} #${num} cobrado · ${fmt(total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : "") + (ed && tip ? ` · propina ${fmt(tip)} para el cadete` : ""));
 }
 
-async function chargeTicket(s, payment, received, btn) {
+async function chargeTicket(s, payment, received, btn, tip = null) {
   if (S.busy) return; S.busy = true; btn.disabled = true;
   const change = payment === "efectivo" ? Math.max(0, received - s.total) : null;
-  const ok = queue("update", "sales/" + s.id, {status: "paid", payment, paidAt: Date.now(), received: payment === "efectivo" ? received : null, change}, `Ticket #${s.num} cobrado (${PAY[payment]} ${fmt(s.total)})`);
+  const ok = queue("update", "sales/" + s.id, {status: "paid", payment, paidAt: Date.now(), received: payment === "efectivo" ? received : null, change, tipCard: tip || 0}, `Ticket #${s.num} cobrado (${PAY[payment]} ${fmt(s.total)})`);
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
   closeModal();
   moneyBurst(s.total, payment, change);
-  printCopy({...s, status: "paid", payment, paidAt: Date.now(), received, change}, "paid"); // 2.ª copia: Comprobante de pago
-  toast(`Ticket #${s.num} cobrado · ${fmt(s.total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : ""));
+  printCopy({...s, status: "paid", payment, paidAt: Date.now(), received, change, tipCard: tip || 0}, "paid"); // 2.ª copia: Comprobante de pago
+  toast(`Ticket #${s.num} cobrado · ${fmt(s.total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : "") + (tip ? ` · propina ${fmt(tip)} para el cadete` : ""));
 }
 
 // Billetes y monedas que salen disparados desde el centro de la pantalla.
@@ -1463,6 +1488,7 @@ function closeShiftDialog() {
   openModal("Cerrar turno", `<p class="hint" style="margin:0">Turno de ${hhmm(sh.openedAt)} a ${hhmm(Date.now())} · ${dur(Date.now() - sh.openedAt)}</p>
     ${pend.length ? `<div class="card"><header><h3>${plural(pend.length, "ticket sin cobrar", "tickets sin cobrar")}</h3><span class="muted">Cobralos o anulalos antes de cerrar</span></header>${salesTable(pend)}</div>` : ""}
     ${tilesHtml(sum, true)}
+    ${cadeteBreakdownHtml(sum, sh)}
     <label class="field"><span>Efectivo contado en caja ($), opcional</span><input id="counted" type="number" min="0" step="1" inputmode="numeric" placeholder="${Math.round(sum.expectedCash)}"></label>
     <div class="paybig" id="diff" hidden><span>Diferencia</span><strong></strong></div>
     ${S.cart.length ? `<p class="hint">Hay un pedido sin cobrar en pantalla; se va a descartar.</p>` : ""}
@@ -1508,6 +1534,7 @@ function showShiftDetail(sh, notesAtClose = "") {
   if (!sales) loadShiftSales(sh.id);
   openModal(`Cierre del ${shortDate(sh.openedAt)}`, `<p class="hint" style="margin:0">${longDate(dayKey(sh.openedAt))} · de ${hhmm(sh.openedAt)} a ${sh.closedAt ? hhmm(sh.closedAt) : "?"}</p>
     ${tilesHtml(sum, true)}
+    ${cadeteBreakdownHtml(sum, sh)}
     ${counted != null ? `<div class="paybig ${Math.round(diff) < 0 ? "short" : "change"}"><span>Contado en caja ${fmt(counted)} · ${Math.round(diff) === 0 ? "caja exacta" : diff < 0 ? "faltó" : "sobró"}</span><strong>${Math.round(diff) === 0 ? fmt(0) : (diff < 0 ? "− " : "+ ") + fmt(Math.abs(diff))}</strong></div>` : ""}
     <div class="card"><header><h3>Productos vendidos</h3></header>${productsTable(sum.products || [])}</div>
     <div class="card"><header><h3>Todas las ventas</h3></header><div id="shift-detail-sales" data-id="${sh.id}">${sales ? salesTable(sales) : `<p class="empty">Cargando ventas…</p>`}</div></div>
@@ -1552,13 +1579,18 @@ function openInvEdit(id) {
     <div class="row2"><label class="field"><span>Unidad</span><select id="i-unit">${UNITS.map(u => `<option ${u === i.unit ? "selected" : ""}>${u}</option>`).join("")}</select></label>
     <label class="field"><span>Stock actual</span><input id="i-stock" type="number" step="any" value="${i.stock ?? ""}" required></label></div>
     <label class="field"><span>Avisar cuando quede menos de</span><input id="i-min" type="number" step="any" min="0" value="${i.min ?? ""}" placeholder="0"></label>
+    <label class="field"><span>Distribuidor · opcional</span><input id="i-supplier" list="supplierlist" maxlength="80" value="${esc(i.supplier || "")}" placeholder="Ej.: Lácteos del Sur, tel. 099 123 456" autocomplete="off">
+      <datalist id="supplierlist">${[...new Set(S.inv.map(x => (x.supplier || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es")).map(v => `<option value="${esc(v)}"></option>`).join("")}</datalist>
+      <small class="muted">Dónde se compra: nombre, teléfono o dirección.</small></label>
     <div class="actions">${id ? `<button type="button" class="btn danger-ghost" id="idel">Eliminar</button>` : ""}<span class="sp"></span><button type="button" class="btn ghost" data-act="close-modal">Cancelar</button><button class="btn primary" type="submit">Guardar</button></div></form>`,
     {onMount: d => {
       d.querySelector("#iform").onsubmit = async e => {
         e.preventDefault();
-        const obj = {name: d.querySelector("#i-name").value.trim(), unit: d.querySelector("#i-unit").value, stock: round3(Number(d.querySelector("#i-stock").value) || 0), min: round3(Number(d.querySelector("#i-min").value) || 0)};
+        const obj = {name: d.querySelector("#i-name").value.trim(), unit: d.querySelector("#i-unit").value, stock: round3(Number(d.querySelector("#i-stock").value) || 0), min: round3(Number(d.querySelector("#i-min").value) || 0), supplier: d.querySelector("#i-supplier").value.replace(/\s+/g, " ").trim()};
         if (!obj.name) return;
-        const ok = queue("set", "inventory/" + (id || newId("inventory")), obj, `Insumo ${obj.name} guardado`); toast("Insumo guardado");
+        // Se conservan los demás datos que ya tenía el insumo.
+        const {id: _omit, ...prev} = id ? i : {};
+        const ok = queue("set", "inventory/" + (id || newId("inventory")), {...prev, ...obj}, `Insumo ${obj.name} guardado`); toast("Insumo guardado");
         if (ok) closeModal();
       };
       const del = d.querySelector("#idel");
@@ -1573,7 +1605,7 @@ function openInvEdit(id) {
 function openInvMove(id, t) {
   const i = S.inv.find(x => x.id === id); if (!i) return;
   openModal(i.name, `<form id="mform" class="form">
-    <p class="hint" style="margin:0">Stock actual: <strong>${qfmt(i.stock)} ${esc(i.unit)}</strong></p>
+    <p class="hint" style="margin:0">Stock actual: <strong>${qfmt(i.stock)} ${esc(i.unit)}</strong>${i.supplier ? `<br>Se compra en: <strong>${esc(i.supplier)}</strong>` : ""}</p>
     <div class="seg" role="radiogroup" aria-label="Tipo de movimiento">
       <label><input type="radio" name="mt" value="in" ${t === "in" ? "checked" : ""}>Entrada</label>
       <label><input type="radio" name="mt" value="out" ${t === "out" ? "checked" : ""}>Salida</label>
@@ -2125,6 +2157,7 @@ function receiptLines(sale, T) {
   else if (sale.payment) {
     L.push({t: pair("Pago", PAY[sale.payment] || sale.payment, W)});
     if (sale.payment === "efectivo" && sale.change) { L.push({t: pair("Entregó", money(sale.received), W)}); L.push({t: pair("Vuelto", money(sale.change), W)}); }
+    if (Number(sale.tipCard) > 0) L.push({t: pair("Propina delivery (tarjeta)", money(sale.tipCard), W)});
   }
   const foot = String(T.footer ?? "").split("\n").map(x => x.trim()).filter(Boolean);
   if (foot.length) { L.push(sepLine(W)); foot.forEach(f => wrapText(f, W).forEach(t => L.push({t, c: true}))); }
@@ -2329,7 +2362,8 @@ function closingLines(sh, sales, notes, T) {
   const base = m.cadeteBase != null ? m.cadeteBase : shiftCadeteBase(sh);
   row("Fijo del turno", money(base));
   row(`Envíos lejanos (${m.farCount || 0})`, money(m.farTotal));
-  row("A pagar", money(m.cadeteTotal != null ? m.cadeteTotal : base + (m.farTotal || 0)), {b: true});
+  row(`Propinas tarjeta (${m.tipCount || 0})`, money(m.tipTotal || 0));
+  row("A pagar", money(m.cadeteTotal != null ? m.cadeteTotal : base + (m.farTotal || 0) + (m.tipTotal || 0)), {b: true});
   if ((m.products || []).length) {
     hr(); L.push({t: "PRODUCTOS", b: true});
     L.push(...itemLines(m.products.map(p => ({name: p.name, qty: p.qty, price: p.qty ? p.total / p.qty : 0})), W));
