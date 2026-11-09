@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pietra · Envíos</title>
+<meta name="theme-color" content="#C2311F">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="../icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Envíos">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Página del cadete: misma piedra y rojo tomate que la caja, una columna, botones grandes para usar con una mano. */
+  --bg:#E8E6E2; --surface:#FFFFFF; --sunk:#F2F1EE; --ink:#1D1C1A; --muted:#66625C; --line:#D5D1CA;
+  --accent:#C2311F; --accent-soft:#F7E2DE; --ok:#2C6E3F; --ok-soft:#DCEEDF; --warn:#8F5A0E; --warn-soft:#F6EAD2; --bad:#B42318; --bad-soft:#F9DEDA;
+  --waze:#1B6AD8;
+  --display:"Bricolage Grotesque","Segoe UI",system-ui,sans-serif; --body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){ :root{
+  --bg:#161514; --surface:#21201E; --sunk:#1B1A19; --ink:#F0EEE9; --muted:#A39F97; --line:#36342F;
+  --accent:#E4513D; --accent-soft:#3A201B; --ok:#62BC7B; --ok-soft:#1D3324; --warn:#E3A64A; --warn-soft:#3A2D16; --bad:#F07264; --bad-soft:#3E1D19;
+  --waze:#4C93F0; color-scheme:dark; } }
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 var(--body);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+button,input{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.top{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding:max(10px, env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;gap:10px}
+.top h1{font-size:21px;font-weight:800}
+.top .sp{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;white-space:nowrap}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.warn{background:var(--warn-soft);color:var(--warn)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.off{background:var(--sunk);color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--surface);padding:10px 14px;border-radius:12px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:48px;text-decoration:none;color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
+.btn.waze{background:var(--waze);border-color:var(--waze);color:#fff}
+.btn.ghost{background:transparent}
+.btn.sm{min-height:36px;padding:6px 10px;font-size:14px}
+.btn:disabled{opacity:.45}
+.btn svg{width:20px;height:20px}
+main{padding:14px 14px calc(24px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+.hint{color:var(--muted);font-size:14px;margin:0}
+.empty{background:var(--surface);border:1px dashed var(--line);border-radius:16px;padding:28px 18px;text-align:center;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card.done{opacity:.85}
+.c-top{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.c-top .num{font:800 22px var(--display)}
+.c-top .who{font-weight:600;font-size:18px}
+.c-top .sp{flex:1}
+.loc{background:var(--sunk);border-radius:12px;padding:10px 12px;font-size:15px;overflow-wrap:anywhere}
+.loc strong{display:block;font-size:13px;color:var(--muted);font-weight:600}
+.nav{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.nav.one{grid-template-columns:1fr}
+.note{background:var(--warn-soft);border-radius:10px;padding:8px 10px;font-weight:600}
+.items{margin:0;padding:0;list-style:none;font-size:15px}
+.items li{display:flex;gap:10px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.items li:last-child{border-bottom:0}
+.items .q{min-width:28px;font-weight:700}
+.money{display:flex;align-items:center;justify-content:space-between;gap:10px;border-radius:12px;padding:10px 12px}
+.money.cobrar{background:var(--warn-soft)} .money.pagado{background:var(--ok-soft)}
+.money strong{font:800 24px var(--display)}
+.money span{font-weight:600}
+.done-list{display:flex;flex-direction:column;gap:8px}
+details summary{cursor:pointer;font-weight:600;color:var(--muted);padding:6px 2px}
+.row{display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.row .sp{flex:1}
+/* Inicio de sesión */
+.login{min-height:100vh;display:grid;place-items:center;padding:16px}
+.login form{width:min(380px,100%);background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:22px;display:flex;flex-direction:column;gap:12px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field span{font-size:13px;font-weight:600;color:var(--muted)}
+.field input{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:12px;font-size:16px}
+/* Hoja para confirmar la entrega */
+#sheet{position:fixed;inset:0;z-index:20;display:grid;align-items:end}
+#sheet .bg{position:absolute;inset:0;background:rgba(20,18,16,.5)}
+#sheet .box{position:relative;background:var(--surface);border-radius:20px 20px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:12px;max-width:640px;margin:0 auto;width:100%}
+#sheet h2{font-size:21px}
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.choices .btn{min-height:64px;font-size:17px}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:30;display:flex;flex-direction:column;gap:8px;width:calc(100% - 32px);max-width:420px;pointer-events:none}
+.toast{background:var(--ink);color:var(--surface);padding:11px 14px;border-radius:12px;font-weight:500;text-align:center}
+.toast.bad{background:var(--bad);color:#fff}
+@keyframes in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.card.new{animation:in .25s ease-out}
+@media (prefers-reduced-motion:reduce){.card.new{animation:none}}
+</style>
+</head>
+<body>
+<div id="login" class="login" hidden></div>
+<div id="app" hidden>
+  <header class="top"><h1>Mis envíos</h1><span id="count" class="pill off"></span><span class="sp"></span><span id="net"></span><button class="btn sm ghost" id="logout">Salir</button></header>
+  <main id="main"><p class="hint">Cargando…</p></main>
+</div>
+<div id="sheet" hidden></div>
+<div id="toast" aria-live="polite"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="../ubicacion.js"></script>
+<script>
+"use strict";
+// Mismo proyecto de Firebase que la caja. Las reglas de Firestore solo le dejan al cadete leer sus envíos
+// y marcar "entregado" (con cómo cobró): no puede ver ventas, turnos ni configuración.
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA7ofd40-fT6KZDB_G-sPvcmKK3nrqpuYo",
+  authDomain: "pizzeria-pietra.firebaseapp.com",
+  projectId: "pizzeria-pietra",
+  storageBucket: "pizzeria-pietra.firebasestorage.app",
+  messagingSenderId: "751027640499",
+  appId: "1:751027640499:web:c3159d6caeed1da73178c6"
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = n => "$ " + Math.round(Number(n) || 0).toLocaleString("es-UY");
+const pad = n => String(n).padStart(2, "0");
+const hhmm = ms => { const d = new Date(ms); return pad(d.getHours()) + ":" + pad(d.getMinutes()); };
+const ago = ms => { const m = Math.max(0, Math.floor((Date.now() - ms) / 60000)); return m < 1 ? "recién" : m < 60 ? `hace ${m} min` : `hace ${Math.floor(m / 60)} h ${pad(m % 60)} min`; };
+const PAY = {efectivo: "efectivo", pos: "POS"};
+const ICON = {
+  waze: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 17a7 7 0 1 1 12.5 0"/><circle cx="8.5" cy="19" r="1.6"/><circle cx="15.5" cy="19" r="1.6"/><path d="M10 11h.01M14 11h.01M10 14c1 .8 3 .8 4 0"/></svg>',
+  map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.3-7-12a7 7 0 0 1 14 0c0 5.7-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>',
+  ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
+};
+let FS, AUTH, list = [], seen = new Set(), pendingWrites = false, unsub = null;
+function toast(msg, kind) { const t = document.createElement("div"); t.className = "toast " + (kind || ""); t.textContent = msg; $("#toast").appendChild(t); setTimeout(() => t.remove(), 3500); }
+
+firebase.initializeApp(FIREBASE_CONFIG);
+AUTH = firebase.auth(); FS = firebase.firestore();
+try { FS.settings({ignoreUndefinedProperties: true, merge: true}); } catch (e) {}
+FS.enablePersistence({synchronizeTabs: true}).catch(() => {});
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("../sw.js").catch(() => {});
+
+AUTH.onAuthStateChanged(u => {
+  if (unsub) { unsub(); unsub = null; }
+  if (!u) { showLogin(); return; }
+  $("#login").hidden = true; $("#app").hidden = false;
+  // Solo los envíos asignados a este correo (las reglas rechazan cualquier otra consulta).
+  unsub = FS.collection("deliveries").where("cadete", "==", (u.email || "").toLowerCase())
+    .onSnapshot({includeMetadataChanges: true}, snap => {
+      list = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      pendingWrites = snap.metadata.hasPendingWrites;
+      render();
+    }, err => {
+      $("#main").innerHTML = `<div class="empty"><strong>No se pueden ver los envíos.</strong><br>${err && err.code === "permission-denied" ? "Esta cuenta no tiene permiso. Pedile al local que revise las reglas de Firebase." : "Revisá la conexión e intentá de nuevo."}</div>`;
+    });
+});
+$("#logout").onclick = () => AUTH.signOut().then(() => location.reload());
+window.addEventListener("online", render); window.addEventListener("offline", render);
+setInterval(render, 60000);
+
+function showLogin() {
+  $("#app").hidden = true;
+  const box = $("#login"); box.hidden = false;
+  box.innerHTML = `<form id="lf"><h1>Envíos · Pietra</h1><p class="hint">Entrá con la cuenta de cadete.</p>
+    <label class="field"><span>Correo</span><input id="le" type="email" autocomplete="username" required></label>
+    <label class="field"><span>Contraseña</span><input id="lp" type="password" autocomplete="current-password" required></label>
+    <p class="hint" id="lerr" style="color:var(--bad)" hidden></p><button class="btn primary" id="lb">Entrar</button></form>`;
+  $("#lf").onsubmit = async e => {
+    e.preventDefault(); const b = $("#lb"); b.disabled = true; b.textContent = "Entrando…";
+    try { await AUTH.signInWithEmailAndPassword($("#le").value.trim(), $("#lp").value); }
+    catch (x) { const c = x && x.code; $("#lerr").textContent = c === "auth/network-request-failed" ? "No hay conexión." : c === "auth/too-many-requests" ? "Demasiados intentos. Esperá unos minutos." : "Correo o contraseña incorrectos."; $("#lerr").hidden = false; b.disabled = false; b.textContent = "Entrar"; }
+  };
+}
+
+function render() {
+  const pend = list.filter(d => d.status !== "entregado").sort((a, b) => (a.assignedAt || 0) - (b.assignedAt || 0));
+  const done = list.filter(d => d.status === "entregado" && Date.now() - (d.deliveredAt || 0) < 12 * 3600e3).sort((a, b) => (b.deliveredAt || 0) - (a.deliveredAt || 0));
+  $("#count").textContent = pend.length === 1 ? "1 pendiente" : `${pend.length} pendientes`;
+  $("#count").className = "pill " + (pend.length ? "warn" : "off");
+  $("#net").innerHTML = !navigator.onLine ? `<span class="pill bad">Sin conexión</span>` : pendingWrites ? `<span class="pill warn">Enviando…</span>` : "";
+  const cards = pend.length ? pend.map(card).join("") : `<div class="empty"><strong>No tenés envíos pendientes.</strong><br>Cuando el local te asigne uno, aparece acá solo.</div>`;
+  const doneHtml = done.length ? `<details><summary>Entregados hoy (${done.length})</summary><div class="done-list">${done.map(d => `<div class="row"><strong>#${esc(d.num)}</strong> ${esc(d.name || "")}<span class="sp"></span><span class="pill ok">${hhmm(d.deliveredAt)}${d.collected ? " · " + PAY[d.collected] : ""}</span>${Date.now() - d.deliveredAt < 10 * 60000 ? `<button class="btn sm ghost" data-undo="${esc(d.id)}">Deshacer</button>` : ""}</div>`).join("")}</div></details>` : "";
+  $("#main").innerHTML = cards + doneHtml;
+  pend.forEach(d => seen.add(d.id));
+  $("#main").querySelectorAll("[data-done]").forEach(b => b.onclick = () => openDeliver(list.find(x => x.id === b.dataset.done)));
+  $("#main").querySelectorAll("[data-undo]").forEach(b => b.onclick = () => undo(b.dataset.undo));
+}
+function card(d) {
+  const L = d.loc && d.loc.kind ? d.loc : Ubicacion.parse((d.loc && d.loc.raw) || "", "");
+  const w = Ubicacion.wazeUrl(L), m = Ubicacion.mapsUrl(L), desc = Ubicacion.describe(L);
+  const paid = d.pay && d.pay.status === "paid";
+  return `<article class="card ${seen.has(d.id) ? "" : "new"}">
+    <div class="c-top"><span class="num">#${esc(d.num)}</span><span class="who">${esc(d.name || "Sin nombre")}</span><span class="sp"></span><span class="hint">${d.assignedAt ? ago(d.assignedAt) : ""}</span></div>
+    <div class="loc"><strong>${esc(desc.label || "Ubicación")}</strong>${esc(L.kind === "coords" ? (L.text || "Punto marcado en el mapa") : L.kind === "address" ? L.text : (L.text || desc.detail))}</div>
+    <div class="nav ${w ? "" : "one"}">${w ? `<a class="btn waze" href="${esc(w)}" target="_blank" rel="noopener">${ICON.waze}Abrir en Waze</a>` : ""}${m ? `<a class="btn" href="${esc(m)}" target="_blank" rel="noopener">${ICON.map}Google Maps</a>` : ""}</div>
+    ${d.note ? `<div class="note">Nota: ${esc(d.note)}</div>` : ""}
+    <ul class="items">${(d.items || []).map(it => `<li><span class="q">${esc(it.qty)}×</span><span>${esc(it.name)}</span></li>`).join("")}</ul>
+    ${paid ? `<div class="money pagado"><span>Ya pagado${d.pay.method ? " (" + PAY[d.pay.method] + ")" : ""}</span><strong>${fmt(d.total)}</strong></div>`
+           : `<div class="money cobrar"><span>Cobrar</span><strong>${fmt(d.total)}</strong></div>`}
+    <button class="btn ok" data-done="${esc(d.id)}">${ICON.ok}Marcar entregado</button>
+  </article>`;
+}
+function closeSheet() { const s = $("#sheet"); s.hidden = true; s.innerHTML = ""; }
+function openDeliver(d) {
+  if (!d) return;
+  const paid = d.pay && d.pay.status === "paid";
+  const s = $("#sheet");
+  s.innerHTML = `<div class="bg"></div><div class="box" role="dialog" aria-modal="true" aria-labelledby="sh">
+    <h2 id="sh">Entregar #${esc(d.num)}${d.name ? " · " + esc(d.name) : ""}</h2>
+    ${paid ? `<p class="hint">Ya está pagado. Confirmá cuando lo hayas entregado.</p><button class="btn ok" data-c="">${ICON.ok}Confirmar entrega</button>`
+           : `<p class="hint">¿Cómo cobraste <strong>${fmt(d.total)}</strong>?</p><div class="choices"><button class="btn primary" data-c="efectivo">Efectivo</button><button class="btn" data-c="pos">POS</button></div>`}
+    <button class="btn ghost" data-x>Volver</button></div>`;
+  s.hidden = false;
+  s.querySelector(".bg").onclick = closeSheet; s.querySelector("[data-x]").onclick = closeSheet;
+  s.querySelectorAll("[data-c]").forEach(b => b.onclick = () => deliver(d, b.dataset.c || null));
+}
+function deliver(d, collected) {
+  closeSheet();
+  // Funciona sin señal: Firebase guarda el cambio en el teléfono y lo manda cuando vuelve la conexión.
+  FS.doc("deliveries/" + d.id).update({status: "entregado", deliveredAt: Date.now(), collected: collected || null})
+    .catch(e => toast(e && e.code === "permission-denied" ? "No tenés permiso para cambiar este envío." : "No se pudo guardar. Probá de nuevo.", "bad"));
+  toast(`#${d.num} entregado` + (collected ? ` · cobrado en ${PAY[collected]}` : ""));
+}
+function undo(id) {
+  FS.doc("deliveries/" + id).update({status: "asignado", deliveredAt: null, collected: null}).catch(() => toast("No se pudo deshacer.", "bad"));
+}
+</script>
+</body>
+</html>

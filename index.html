@@ -108,6 +108,9 @@ nav.tabs .dot{display:inline-block;min-width:18px;height:18px;line-height:18px;p
 .syncbtn:hover{filter:brightness(.96)}
 .pill.envio{background:var(--accent-soft);color:var(--accent)}
 .tile.cadete{border-style:dashed;background:var(--sunk)}
+.locinfo{font-size:13px;line-height:1.5;margin-top:-4px;overflow-wrap:anywhere}
+.loclinks{display:inline-flex;gap:10px;margin-left:4px}
+.loclinks a{color:var(--accent);font-weight:600}
 .pill.tip{background:var(--sunk);color:var(--ink);border:1px dashed var(--line)}
 .tipfield{border:1px dashed var(--line);border-radius:10px;padding:10px 12px;background:var(--sunk)}
 tr.totrow td{border-top:2px solid var(--line)}
@@ -440,6 +443,7 @@ body.phone .toast{text-align:center}
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="ubicacion.js"></script>
 <script>
 "use strict";
 /* ---------- Utilidades ---------- */
@@ -491,7 +495,7 @@ function looksLikePhone() {
 function detectPhone() { const m = S.devMode || deviceSetting(); return m === "phone" ? true : m === "pc" ? false : looksLikePhone(); }
 const viewsHere = () => S.phone ? VIEWS.filter(v => v[0] !== "vender") : VIEWS;
 // Acciones de venta y cobro que no se hacen desde el celular.
-const PC_ONLY = new Set(["add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit"]);
+const PC_ONLY = new Set(["add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit", "assign", "unassign"]);
 const NAV_ICONS = {
   ventas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"></path><path d="M9 7h6M9 11h6M9 15h4"></path></svg>',
   turno: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
@@ -608,9 +612,9 @@ async function save(fn, okMsg) {
    campos, así que reenviarla después de un corte no duplica nada. */
 const OUTBOX_KEY = "pietra-outbox-v1";
 const OB = {ops: [], failed: [], recent: [], persist: true, flushing: false, inflight: null, net: navigator.onLine !== false, lastTry: 0};
-const RAW = {sales: [], shifts: [], inv: []};
+const RAW = {sales: [], shifts: [], inv: [], deliveries: []};
 const PENDING = new Map(); // escrituras ya entregadas a Firebase que esperan conexión
-const COLL_KEY = {sales: "sales", shifts: "shifts", inventory: "inv"};
+const COLL_KEY = {sales: "sales", shifts: "shifts", inventory: "inv", deliveries: "deliveries"};
 function obLoad() {
   try { const raw = localStorage.getItem(OUTBOX_KEY); const d = raw ? JSON.parse(raw) : {}; OB.ops = d.ops || []; OB.failed = d.failed || []; }
   catch (e) { OB.persist = false; }
@@ -665,7 +669,9 @@ async function flush() {
 }
 // Lo que muestra la app = lo que vino de la cuenta + los cambios de este equipo que todavía no llegaron.
 function overlay(coll, docs) {
-  const list = [...OB.recent.filter(o => Date.now() - o.doneAt < 20000), ...OB.ops].filter(o => o.path.split("/")[0] === coll);
+  // Solo los cambios de este equipo que todavía no salieron. Los ya enviados no se vuelven a aplicar:
+  // Firebase ya los muestra en sus datos, y reaplicarlos taparía cambios hechos después en otro equipo (por ejemplo, el cadete).
+  const list = OB.ops.filter(o => o.path.split("/")[0] === coll);
   if (!list.length) return docs;
   const map = new Map(docs.map(d => [d.id, d]));
   list.forEach(o => {
@@ -676,7 +682,7 @@ function overlay(coll, docs) {
   });
   return [...map.values()];
 }
-function recompute() { S.sales = overlay("sales", RAW.sales); S.shifts = overlay("shifts", RAW.shifts); S.inv = overlay("inventory", RAW.inv); }
+function recompute() { S.sales = overlay("sales", RAW.sales); S.shifts = overlay("shifts", RAW.shifts); S.inv = overlay("inventory", RAW.inv); S.deliveries = overlay("deliveries", RAW.deliveries); }
 function syncState() {
   const n = OB.ops.length;
   if (!OB.net && n) return {cls: "bad", text: S.phone ? `Sin conexión · ${n}` : `Sin conexión · ${plural(n, "cambio sin sincronizar", "cambios sin sincronizar")}`};
@@ -735,7 +741,7 @@ function connectDb() {
   const timer = setTimeout(() => { if (S.status !== "ready") { S.status = "slow"; render(); } }, 10000);
   const db = makeDb(FS);
   S.db = db;
-  const keys = ["menu", "inv", "shifts", "sales", "settings", "ticket", "auth"];
+  const keys = ["menu", "inv", "shifts", "sales", "settings", "ticket", "auth", "deliveries"];
   const done = (k, fromCache) => {
     S.got[k] = true; if (!fromCache) S.fresh[k] = true;
     if (keys.every(x => S.got[x]) && S.status === "loading") S.status = "ready";
@@ -746,6 +752,7 @@ function connectDb() {
   const coll = (q, key) => q.onSnapshot(snap => {
     const docs = snap.docs.map(d => ({id: d.id, ...d.data()}));
     if (key in RAW) { RAW[key] = docs; recompute(); } else S[key] = docs;
+    if (key === "deliveries") watchDeliveries(snap.metadata.fromCache);
     if (!snap.metadata.fromCache && (key === "sales" || key === "shifts")) S.liveAt = Date.now();
     done(key, snap.metadata.fromCache);
   }, onErr);
@@ -753,6 +760,7 @@ function connectDb() {
   coll(db.collection("inventory"), "inv");
   coll(db.collection("shifts").orderBy("openedAt", "desc").limit(120), "shifts");
   coll(db.collection("sales"), "sales");
+  coll(db.collection("deliveries"), "deliveries");
   db.doc("config/settings").onSnapshot(snap => { S.settings = snap.exists ? {...snap.data()} : {}; S.settingsExists = snap.exists; done("settings", snap.metadata.fromCache); }, onErr);
   db.doc("config/ticket").onSnapshot(snap => { S.ticket = snap.exists ? {...snap.data()} : {}; done("ticket", snap.metadata.fromCache); }, onErr);
   db.doc("config/auth").onSnapshot(snap => { S.auth = snap.exists ? {...snap.data()} : null; done("auth", snap.metadata.fromCache); }, onErr);
@@ -808,7 +816,7 @@ function render() {
   if (S.status !== "loading" && S.status !== "nocfg" && !OB.net) banner = `<p class="banner bad"><span><strong>Sin conexión.</strong> Seguí vendiendo normalmente: ventas, cobros y pedidos se guardan en este equipo y se sincronizan solos cuando vuelva internet.${OB.ops.length ? ` <strong>${plural(OB.ops.length, "cambio pendiente", "cambios pendientes")}.</strong>` : ""}</span><button class="btn sm" data-act="sync">Ver detalle</button></p>`;
   else if (S.status === "slow") banner = `<p class="banner">No se puede llegar a la base de datos todavía. Lo que ves puede estar desactualizado; la app sigue intentando.</p>`;
   else if (S.status === "error") banner = S.err === "permiso"
-    ? `<p class="banner bad"><span>Este usuario (${esc(S.user && S.user.email)}) no tiene permiso para ver los datos. Revisá que su correo esté en las reglas de Firestore.</span><button class="btn sm" data-act="logout">Cambiar de usuario</button></p>`
+    ? `<p class="banner bad"><span>Este usuario (${esc(S.user && S.user.email)}) no tiene acceso a la caja. <strong>Si sos el cadete, usá <a href="cadete/">la página de envíos</a>.</strong> Si sos el dueño, revisá las reglas de Firestore.</span><button class="btn sm" data-act="logout">Cambiar de usuario</button></p>`
     : `<p class="banner bad">Se perdió la conexión con los datos (${esc(S.err || "error")}). Recargá la página para reconectar.</p>`;
   else if (S.status === "ready" && S.settings.example && (S.view === "vender" || S.view === "menu" || S.view === "inventario"))
     banner = `<p class="banner"><span>El menú y el inventario son de <strong>ejemplo</strong>. Cargá tus productos y precios reales en <strong>Menú</strong> y tus insumos en <strong>Inventario</strong>.</span><button class="btn sm" data-act="dismiss-example">Entendido</button></p>`;
@@ -901,7 +909,8 @@ function viewSell() {
           <label><input type="radio" name="omode" value="envio" ${S.mode === "envio" ? "checked" : ""}>Envío</label>
         </div>
         <label class="field"><span>Nombre del cliente</span><input class="text" id="note" placeholder="Nombre o mesa" value="${esc(S.note)}" autocomplete="off"></label>
-        ${S.mode === "envio" ? `<label class="field"><span>Dirección de envío</span><input class="text" id="addr" placeholder="Calle, número, apto, esquina" value="${esc(S.addr)}" autocomplete="off"></label>
+        ${S.mode === "envio" ? `<label class="field"><span>Dirección o ubicación</span><input class="text" id="addr" placeholder="Pegá la dirección o el enlace de ubicación de WhatsApp" value="${esc(S.addr)}" autocomplete="off"></label>
+        <div id="addr-info" class="locinfo" aria-live="polite">${locInfoHtml(S.addr)}</div>
         <label class="farbox"><input type="checkbox" id="far" ${S.far ? "checked" : ""}> +${farFee()} envío lejano <small>Para el cadete, no se cobra</small></label>` : ""}
         <label class="field"><span>Nota del pedido</span><textarea class="text" id="onote" rows="2" placeholder="Ej.: sin cebolla, bien cocida, cortada en 8">${esc(S.onote)}</textarea></label>
         <div class="total"><span>Total</span><strong>${fmt(total)}</strong></div>
@@ -931,7 +940,7 @@ function salesTable(sales) {
   const tk = s => !s.cancelled;
   const any = sales.some(s => act(s) || tk(s));
   if (S.phone) return `<div class="mlist">${sales.map(s => `<div class="mrow ${s.cancelled ? "cancel" : ""}" ${tk(s) ? `data-act="ticket-view" data-id="${s.id}" role="button" tabindex="0"` : ""}>
-      <div class="mr-top"><strong>#${s.num ?? ""}</strong><span class="muted">${hhmm(s.createdAt)}</span>${payPill(s)}${s.far && !s.cancelled ? `<span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}<span class="sp"></span><span class="amt">${fmt(s.total)}</span></div>
+      <div class="mr-top"><strong>#${s.num ?? ""}</strong><span class="muted">${hhmm(s.createdAt)}</span>${payPill(s)}${deliveryBadge(s)}${s.far && !s.cancelled ? `<span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}<span class="sp"></span><span class="amt">${fmt(s.total)}</span></div>
       ${s.note ? `<strong>${esc(s.note)}</strong>` : ""}
       <div class="mr-sub">${itemsText(s.items)}</div>
       ${orderMeta(s) ? `<div>${orderMeta(s, {inline: true})}</div>` : ""}
@@ -940,9 +949,9 @@ function salesTable(sales) {
     ${sales.map(s => `<tr class="${s.cancelled ? "cancel" : ""}">
       <td>${s.num ?? ""}</td><td>${hhmm(s.createdAt)}</td>
       <td class="items-sum">${itemsText(s.items)}${s.note ? `<br><strong>${esc(s.note)}</strong>` : ""}${orderMeta(s)}</td>
-      <td class="keep">${payPill(s)}${s.far && !s.cancelled ? ` <span class="pill warn plain" title="Envío lejano">+${s.farFee || farFee()}</span>` : ""}</td>
+      <td class="keep">${payPill(s)}${s.far && !s.cancelled ? ` <span class="pill warn plain" title="Envío lejano">+${s.farFee || farFee()}</span>` : ""} ${deliveryBadge(s)}</td>
       <td class="num">${fmt(s.total)}</td>
-      ${any ? `<td class="num keep">${tk(s) ? `<button class="btn sm ghost" data-act="ticket-view" data-id="${s.id}">Ticket</button> ` : ""}${act(s) ? `${s.status === "pending" ? `<button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button> <button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button> ` : ""}<button class="btn sm ghost" data-act="cancel-sale" data-id="${s.id}">Anular</button>` : ""}</td>` : ""}
+      ${any ? `<td class="num keep">${deliveryButtons(s)} ${tk(s) ? `<button class="btn sm ghost" data-act="ticket-view" data-id="${s.id}">Ticket</button> ` : ""}${act(s) ? `${s.status === "pending" ? `<button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button> <button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button> ` : ""}<button class="btn sm ghost" data-act="cancel-sale" data-id="${s.id}">Anular</button>` : ""}</td>` : ""}
     </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -1157,6 +1166,81 @@ function checkStale() {
   else if (S.view === "vender" && $("#modal").hidden) { const b = document.querySelector(".savedbtn"); if (b) render(); }
 }
 
+/* ---------- Envíos del cadete ----------
+   Cada envío asignado es una ficha en "deliveries" (mismo id que la venta) con lo justo para el cadete:
+   cliente, ubicación, nota, productos sin precios, total y si hay que cobrar. Las reglas de Firestore le
+   dejan leer solo sus fichas y cambiar solo el estado (entregado) y cómo cobró. */
+const deliveryCity = () => (S.settings.deliveryCity ?? "Ciudad del Plata, San José").trim();
+const cadeteEmail = () => String(S.settings.cadeteEmail || "").trim().toLowerCase();
+const deliveryOf = id => (S.deliveries || []).find(d => d.id === id) || null;
+function locInfoHtml(raw) {
+  if (!String(raw || "").trim()) return `<span class="muted">Ej.: Calle 5 1234 · un enlace de Google Maps · la ubicación que mandó el cliente por WhatsApp</span>`;
+  const L = Ubicacion.parse(raw, deliveryCity()), d = Ubicacion.describe(L), w = Ubicacion.wazeUrl(L), m = Ubicacion.mapsUrl(L);
+  return `<span class="pill ${d.ok ? "ok" : "warn"} plain">${esc(d.label)}</span> <span class="muted">${esc(d.detail)}</span>
+    <span class="loclinks">${w ? `<a href="${esc(w)}" target="_blank" rel="noopener">Probar en Waze</a>` : ""}${m ? `<a href="${esc(m)}" target="_blank" rel="noopener">Ver en Maps</a>` : ""}</span>`;
+}
+function deliveryFields(sale) {
+  const paid = sale.status !== "pending";
+  return {
+    saleId: sale.id, shiftId: sale.shiftId, num: sale.num ?? null, name: sale.note || "",
+    loc: Ubicacion.parse(sale.address || "", deliveryCity()), note: sale.orderNote || "",
+    items: (sale.items || []).map(it => ({qty: it.qty, name: it.name})), total: sale.total,
+    pay: paid ? {status: "paid", method: sale.payment || null} : {status: "pending"}
+  };
+}
+function assignDelivery(id) {
+  const s = S.sales.find(x => x.id === id); if (!s || s.cancelled) return;
+  const email = cadeteEmail();
+  if (!email) { toast("Primero cargá el correo del cadete en Configuración → Cadete.", "bad"); return; }
+  if (!String(s.address || "").trim()) { toast("El pedido no tiene dirección o ubicación. Abrilo y pegala antes de asignarlo.", "bad"); return; }
+  queue("set", "deliveries/" + id, {...deliveryFields(s), cadete: email, status: "asignado", assignedAt: Date.now(), deliveredAt: null, collected: null}, `Envío #${s.num} asignado al cadete`);
+  toast(`Pedido #${s.num} asignado al cadete`);
+}
+function unassignDelivery(id) {
+  const d = deliveryOf(id); if (!d || d.status === "entregado") return;
+  queue("delete", "deliveries/" + id, null, `Envío #${d.num} sin asignar`); toast("Se quitó la asignación");
+}
+// Mantiene la ficha al día si el pedido cambia (productos, dirección, cobro) o se borra/anula.
+function syncDelivery(sale, removed = false) {
+  if (!sale || !sale.id) return;
+  const d = deliveryOf(sale.id); if (!d || d.status === "entregado") return;
+  if (removed || sale.cancelled || sale.mode !== "envio") { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
+  queue("update", "deliveries/" + sale.id, deliveryFields(sale), `Envío #${d.num} actualizado`);
+}
+// Avisa en la caja cuando el cadete marca un envío como entregado y lo anota en la venta.
+let deliveryStatusSeen = null;
+const deliveredNotified = new Set();
+function watchDeliveries(fromCache) {
+  const prev = deliveryStatusSeen;
+  deliveryStatusSeen = new Map((S.deliveries || []).map(d => [d.id, d.status])); // antes de avisar: evita avisos repetidos
+  if (prev && !fromCache) {
+    (S.deliveries || []).forEach(d => {
+      if (d.status === "entregado" && prev.get(d.id) === "asignado" && !deliveredNotified.has(d.id + ":" + d.deliveredAt)) {
+        deliveredNotified.add(d.id + ":" + d.deliveredAt);
+        const s = S.sales.find(x => x.id === d.id);
+        toast(`Pedido #${d.num}${d.name ? " de " + d.name : ""} entregado` + (d.collected ? ` · el cadete cobró ${d.collected === "pos" ? "con POS" : "en efectivo"}` : ""));
+        if (s && !s.deliveredAt) queue("update", "sales/" + s.id, {deliveredAt: d.deliveredAt || Date.now(), collected: d.collected || null}, `Envío #${d.num} entregado`);
+      }
+    });
+  }
+}
+function deliveryBadge(s) {
+  if (!s || s.mode !== "envio" || s.cancelled) return "";
+  const d = deliveryOf(s.id);
+  if (d && d.status === "entregado") return `<span class="pill ok plain">Entregado ${d.deliveredAt ? hhmm(d.deliveredAt) : ""}${d.collected ? ` · cobró ${d.collected === "pos" ? "POS" : "efectivo"}` : ""}</span>`;
+  if (d) return `<span class="pill envio plain">Con el cadete</span>`;
+  if (s.deliveredAt) return `<span class="pill ok plain">Entregado ${hhmm(s.deliveredAt)}</span>`;
+  return "";
+}
+function deliveryButtons(s) {
+  if (!s || s.mode !== "envio" || s.cancelled || S.phone) return "";
+  const sh = currentShift(); if (!sh || s.shiftId !== sh.id) return "";
+  const d = deliveryOf(s.id);
+  if (!d && !s.deliveredAt) return `<button class="btn sm dark" data-act="assign" data-id="${s.id}">Asignar al cadete</button>`;
+  if (d && d.status === "asignado") return `<button class="btn sm ghost" data-act="unassign" data-id="${s.id}">Quitar asignación</button>`;
+  return "";
+}
+
 /* ---------- Animaciones ---------- */
 const reduceMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
 // Reproduce una animación CSS sobre un elemento sin bloquear nada (la clase se quita sola al terminar).
@@ -1208,9 +1292,16 @@ function resetCart() { S.cart = []; S.note = ""; S.far = false; S.editId = null;
 const isFar = () => S.mode === "envio" && S.far;
 const orderFields = () => ({note: S.note.trim(), mode: S.mode, address: S.mode === "envio" ? S.addr.trim() : "", orderNote: S.onote.trim(), far: isFar(), farFee: isFar() ? farFee() : 0});
 // Tipo de pedido, dirección y nota, para mostrar en listas y detalles.
+// Texto corto de la ubicación para listas y tickets (los enlaces largos no se muestran enteros).
+function addressShort(raw) {
+  const L = Ubicacion.parse(raw, "");
+  if (L.kind === "coords") return L.text ? `${L.text} (ubicación exacta)` : `Ubicación exacta ${L.lat}, ${L.lng}`;
+  if (L.kind === "short" || L.kind === "link") return L.text ? `${L.text} (enlace de ubicación)` : "Enlace de ubicación";
+  return L.text || String(raw);
+}
 function orderMeta(s, opts = {}) {
   const parts = [];
-  if (s.mode === "envio") parts.push(`<span class="pill envio plain">Envío</span>${s.address ? ` <span class="muted">${esc(s.address)}</span>` : ""}`);
+  if (s.mode === "envio") parts.push(`<span class="pill envio plain">Envío</span>${s.address ? ` <span class="muted">${esc(addressShort(s.address))}</span>` : ""}`);
   else if (s.mode === "retiro") parts.push(`<span class="pill off plain">Retiro</span>`);
   if (s.orderNote) parts.push(`<span class="onote">Nota: ${esc(s.orderNote)}</span>`);
   return parts.length ? (opts.inline ? " " : "<br>") + parts.join(" ") : "";
@@ -1225,6 +1316,7 @@ async function holdTicket(btn) {
   if (ed) {
     msg = `Ticket #${ed.num} actualizado · ${fmt(cartTotal())}`;
     ok = queue("update", "sales/" + ed.id, cartFields(), `Ticket #${ed.num} editado`);
+    syncDelivery({...ed, ...cartFields()});
   } else {
     const sale = newSale("pending"), id = newId("sales");
     msg = `Ticket #${sale.num}${sale.note ? " de " + sale.note : ""} guardado · ${fmt(sale.total)} por cobrar`;
@@ -1260,7 +1352,7 @@ function openDeleteTicket(id) {
     <div class="actions end"><button class="btn ghost" data-act="close-modal">No eliminar</button><button class="btn primary" id="dok">Eliminar ticket</button></div>`,
     {onMount: d => d.querySelector("#dok").onclick = async e => {
       e.target.disabled = true;
-      const ok = queue("delete", "sales/" + id, null, `Ticket #${s.num} eliminado`); toast(`Ticket #${s.num} eliminado`);
+      const ok = queue("delete", "sales/" + id, null, `Ticket #${s.num} eliminado`); toast(`Ticket #${s.num} eliminado`); syncDelivery(s, true);
       if (ok) { if (S.editId === id) resetCart(); closeModal(); } else e.target.disabled = false;
     }});
 }
@@ -1289,7 +1381,7 @@ function openSaved() {
           <div class="what"><span class="age ${isStale(s) ? "late" : ""}">${isStale(s) ? `Hace ${ageText(s)} sin cobrar` : `Hace ${ageText(s)}`}</span> · creado ${hhmm(s.createdAt)}</div>
           <div class="what">${itemsText(s.items)}</div>${orderMeta(s) ? `<div class="what">${orderMeta(s, {inline: true})}</div>` : ""}</div>
         <span class="amt">${fmt(s.total)}</span>
-        <div class="btns"><button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir ticket</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
+        <div class="btns">${deliveryBadge(s)}${deliveryButtons(s)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir ticket</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`).join("")}</div>`;
   };
   openModal("Guardados", `<div class="seg" role="radiogroup" aria-label="Ordenar por">
@@ -1364,6 +1456,8 @@ function openCharge(saleId) {
         s ? chargeTicket(s, m, recv, ok, tip) : chargeCart(m, recv, ok, tip);
       };
       upd();
+      const dl = deliveryOf((s || ed || {}).id);
+      if (dl && dl.collected) { setM(dl.collected === "pos" ? "pos" : "efectivo"); const n = document.createElement("p"); n.className = "hint"; n.style.margin = "0"; n.innerHTML = `<strong>El cadete cobró ${dl.collected === "pos" ? "con POS" : "en efectivo"}</strong> al entregar.`; d.querySelector(".seg.two-opt").after(n); }
     }});
 }
 
@@ -1384,6 +1478,7 @@ async function chargeCart(payment, received, btn, tip = null) {
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
   const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change, tipCard: tip || 0} : null;
+  if (printed) syncDelivery(printed);
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
@@ -1401,6 +1496,7 @@ async function chargeTicket(s, payment, received, btn, tip = null) {
   closeModal();
   moneyBurst(s.total, payment, change);
   printCopy({...s, status: "paid", payment, paidAt: Date.now(), received, change, tipCard: tip || 0}, "paid"); // 2.ª copia: Comprobante de pago
+  syncDelivery({...s, status: "paid", payment});
   toast(`Ticket #${s.num} cobrado · ${fmt(s.total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : "") + (tip ? ` · propina ${fmt(tip)} para el cadete` : ""));
 }
 
@@ -1458,7 +1554,7 @@ function openCancel(id) {
     <div class="actions end"><button class="btn ghost" data-act="close-modal">No anular</button><button class="btn primary" id="cok">Anular</button></div>`,
     {onMount: d => d.querySelector("#cok").onclick = async e => {
       e.target.disabled = true;
-      const ok = queue("update", "sales/" + id, {cancelled: true, cancelledAt: Date.now()}, `${pend ? "Ticket" : "Venta"} #${s.num} anulada`); toast(pend ? "Ticket anulado" : "Venta anulada");
+      const ok = queue("update", "sales/" + id, {cancelled: true, cancelledAt: Date.now()}, `${pend ? "Ticket" : "Venta"} #${s.num} anulada`); toast(pend ? "Ticket anulado" : "Venta anulada"); syncDelivery(s, true);
       if (ok) { closeModal(); if (s.stockUse) applyStock(s.stockUse, 1); } else e.target.disabled = false;
     }});
 }
@@ -1522,6 +1618,7 @@ async function doCloseShift(sh, sales, sum, counted, btn) {
   const closedShift = {...sh, status: "closed", closedAt, summary: sum, countedCash: counted, notes: ""};
   if (S.printer) printClosing(closedShift, clean, notes).then(ok => { if (ok) toast("Ticket de cierre impreso"); });
   for (const s of sales) { try { await S.db.doc("sales/" + s.id).delete(); } catch (e) {} }
+  for (const dl of (S.deliveries || []).filter(x => x.shiftId === sh.id && x.status === "entregado")) { try { await S.db.doc("deliveries/" + dl.id).delete(); } catch (e) {} }
   closingFx(sum);
   setTimeout(() => showShiftDetail(closedShift, notes), reduceMotion() ? 0 : 750);
 }
@@ -1761,6 +1858,8 @@ const A = {
   "exit-edit": () => { resetCart(); render(); toast("Saliste del ticket sin guardar cambios"); },
   "delete-ticket": el => openDeleteTicket(el.dataset.id),
   "open-ticket": el => openTicket(el.dataset.id),
+  assign: el => assignDelivery(el.dataset.id),
+  unassign: el => unassignDelivery(el.dataset.id),
   "print-saved": el => printPendingNow(S.sales.find(x => x.id === el.dataset.id), el),
   "print-edit": el => { const ed = editingSale(); if (ed) printPendingNow({...ed, ...cartFields(), editedAt: Date.now()}, el); },
   saved: () => openSaved(),
@@ -1821,7 +1920,7 @@ document.addEventListener("keydown", e => {
 document.addEventListener("input", e => {
   if (e.target.id === "note") S.note = e.target.value;
   if (e.target.id === "shiftnotes") onNotesInput(e.target.value);
-  if (e.target.id === "addr") S.addr = e.target.value;
+  if (e.target.id === "addr") { S.addr = e.target.value; const box = $("#addr-info"); if (box) box.innerHTML = locInfoHtml(S.addr); }
   if (e.target.id === "onote") S.onote = e.target.value;
   if (e.target.id === "q") { S.q = e.target.value; render(); }
   if (e.target.id === "opencash") S.openCash = e.target.value;
@@ -1951,6 +2050,13 @@ function viewConfig() {
         <div class="actions end"><button class="btn primary" id="c-save-local">Guardar</button></div>
       </div></div>
 
+      <div class="card"><header><h3>Cadete</h3></header><div class="body">
+        <label class="field"><span>Correo de la cuenta del cadete</span><input id="c-cademail" class="text" type="email" value="${esc(st.cadeteEmail || "")}" placeholder="cadete@pietra.uy" autocomplete="off"></label>
+        <label class="field"><span>Ciudad que se agrega a las direcciones escritas</span><input id="c-city" class="text" value="${esc(st.deliveryCity ?? "Ciudad del Plata, San José")}" placeholder="Ciudad del Plata, San José"></label>
+        <p class="hint" style="margin:0">El cadete entra con su correo y contraseña en <strong id="c-cadlink">${esc(location.origin + location.pathname.replace(/[^/]*$/, "") + "cadete/")}</strong>. Solo ve sus envíos pendientes: no ve ventas, turnos ni configuración.</p>
+        <div class="actions end"><button class="btn" id="c-copycad">Copiar enlace</button><button class="btn primary" id="c-save-cad">Guardar</button></div>
+      </div></div>
+
       <div class="card"><header><h3>Apariencia</h3></header><div class="body">
         <div class="field"><span>Tema</span>${seg("c-theme", st.theme || "auto", [["auto", "Automático"], ["light", "Claro"], ["dark", "Oscuro"]])}</div>
         <div class="field"><span>Color principal</span><div class="swatches" role="radiogroup">${Object.entries(ACCENTS).map(([k, a]) => `<label class="swatch"><input type="radio" name="c-accent" value="${k}" ${(st.accent || "tomate") === k ? "checked" : ""}><i style="background:${a.l}"></i>${a.name}</label>`).join("")}</div></div>
@@ -2018,6 +2124,13 @@ function mountConfig() {
     const ok = await setSetting({businessName: m.querySelector("#c-name").value.trim(), farFee: far, cadeteBase: cad});
     if (ok) toast("Datos del local guardados");
   };
+  m.querySelector("#c-save-cad").onclick = async () => {
+    const email = m.querySelector("#c-cademail").value.trim().toLowerCase();
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Ese correo no parece válido.", "bad"); return; }
+    const ok = await setSetting({cadeteEmail: email, deliveryCity: m.querySelector("#c-city").value.trim()});
+    if (ok) toast("Datos del cadete guardados");
+  };
+  m.querySelector("#c-copycad").onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector("#c-cadlink").textContent); toast("Enlace copiado"); } catch (e) { toast("No se pudo copiar: seleccioná el enlace y copialo a mano.", "bad"); } };
   m.querySelector("#c-save-auth").onclick = async () => {
     const u = m.querySelector("#c-user").value.trim(), p1 = m.querySelector("#c-pass").value, p2 = m.querySelector("#c-pass2").value;
     if (!u) { toast("El usuario no puede quedar vacío.", "bad"); return; }
@@ -2147,7 +2260,7 @@ function receiptLines(sale, T) {
   L.push({t: pair(`Ticket ${sale.num ?? ""}`, fmtDate(kind === "pending" ? sale.createdAt : (sale.paidAt || sale.createdAt)), W), b: true});
   const who = [sale.note, sale.mode === "envio" ? "ENVÍO" : sale.mode === "retiro" ? "RETIRO" : ""].filter(Boolean).join(" · ");
   if (who) wrapText(who, W).forEach(t => L.push({t, b: true}));
-  if (sale.mode === "envio" && sale.address) wrapText(sale.address, W).forEach(t => L.push({t}));
+  if (sale.mode === "envio" && sale.address) wrapText(addressShort(sale.address), W).forEach(t => L.push({t}));
   L.push(sepLine(W));
   L.push(...itemLines(sale.items, W));
   if (sale.orderNote) { L.push(sepLine(W)); wrapText("NOTA: " + sale.orderNote, W).forEach(t => L.push({t, b: true})); }
