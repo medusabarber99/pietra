@@ -199,6 +199,12 @@ main{overflow:auto;min-height:0}
 .ticket.editing{box-shadow:inset 0 4px 0 var(--warn)}
 .editbar{display:flex;gap:8px;align-items:center;padding:8px 18px;background:var(--warn-soft);font-size:14px;font-weight:600}
 .saved-list{display:flex;flex-direction:column;gap:8px}
+#dropzone{position:fixed;inset:0;z-index:60;display:flex;align-items:center;justify-content:center;background:rgba(20,16,12,.35);pointer-events:none}
+#dropzone>div{display:flex;flex-direction:column;gap:6px;align-items:center;text-align:center;background:var(--surface);color:var(--ink);border:3px dashed var(--accent);border-radius:20px;padding:28px 40px;font-size:15px;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+#dropzone strong{font-family:var(--display);font-size:24px}
+#dropzone.onrows{background:transparent;align-items:flex-start;padding-top:18px}
+#dropzone.onrows>div{padding:12px 24px}
+.srow.dropover{outline:3px dashed var(--accent);outline-offset:2px;background:var(--sunk)}
 .srow{display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface)}
 .srow:hover{border-color:var(--ink)}
 .srow .num{font-family:var(--display);font-weight:700;font-size:18px;color:var(--muted)}
@@ -439,6 +445,7 @@ body.phone .toast{text-align:center}
 <div id="login" hidden></div>
 <div id="modal" hidden></div>
 <div id="toast" aria-live="polite"></div>
+<div id="dropzone" hidden><div><strong>Soltá la ubicación acá</strong><span id="droptext">Se carga en el pedido y se marca Envío</span></div></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
@@ -1385,7 +1392,7 @@ function openSaved() {
     const late = list.filter(isStale);
     return `${late.length ? `<div class="late-alert" role="status"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg><span><strong>${plural(late.length, "ticket lleva", "tickets llevan")} más de ${STALE_MIN} minutos sin cobrar.</strong> ${late.length === 1 ? "Está marcado" : "Están marcados"} en rojo.</span></div>` : ""}
       <p class="hint" style="margin:0">${plural(list.length, "ticket", "tickets")} · ${fmt(total)} por cobrar · se actualiza solo</p>
-      <div class="saved-list">${list.map(s => `<div class="srow ${isStale(s) ? "late" : ""}">
+      <div class="saved-list">${list.map(s => `<div class="srow ${isStale(s) ? "late" : ""}" data-sid="${s.id}">
         <span class="num">#${s.num}</span>
         <div><div class="who">${s.note ? esc(s.note) : `<span class="muted">Sin nombre</span>`}${s.far ? ` <span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}${S.editId === s.id ? ` <span class="pill warn plain">Editando</span>` : ""}</div>
           <div class="what"><span class="age ${isStale(s) ? "late" : ""}">${isStale(s) ? `Hace ${ageText(s)} sin cobrar` : `Hace ${ageText(s)}`}</span> · creado ${hhmm(s.createdAt)}</div>
@@ -1675,6 +1682,63 @@ function saveNotesNow() {
   clearTimeout(S.notesLabelTimer);
   S.notesLabelTimer = setTimeout(() => { const el = $("#notes-state"); if (el && Date.now() - S.notesSavedAt >= 4900) el.textContent = "Se guardan solas · se borran al cerrar el turno"; }, 5000);
 }
+/* ---------- Soltar una ubicación (arrastrada desde WhatsApp) ----------
+   En Vender: se carga en el pedido que se está armando o editando y se marca Envío.
+   Con Guardados abierto: se suelta sobre un ticket y se le carga a ese pedido (y a la ficha del cadete si ya estaba asignado). */
+let dragDepth = 0;
+const dragHasText = e => { const t = e.dataTransfer && [...(e.dataTransfer.types || [])]; return !!t && !t.includes("Files") && (t.includes("text/uri-list") || t.includes("text/plain")); };
+function droppedText(dt) {
+  const uri = (dt.getData("text/uri-list") || "").split(/\r?\n/).map(x => x.trim()).find(x => x && !x.startsWith("#"));
+  return (uri || dt.getData("text/plain") || dt.getData("URL") || "").trim();
+}
+const savedOpen = () => !!(S.savedRefresh && !$("#modal").hidden && document.querySelector("#savedrows"));
+function dropTarget(e) { return savedOpen() ? (e.target.closest && e.target.closest(".srow[data-sid]")) : null; }
+function showDropzone(on, e) {
+  const z = $("#dropzone"); z.hidden = !on;
+  document.querySelectorAll(".srow.dropover").forEach(r => r.classList.remove("dropover"));
+  if (!on) return;
+  const rows = savedOpen();
+  z.classList.toggle("onrows", rows);
+  const row = rows && e ? dropTarget(e) : null;
+  if (row) row.classList.add("dropover");
+  $("#droptext").textContent = rows ? (row ? "Se carga en este ticket" : "Soltala sobre un ticket de la lista")
+    : S.view !== "vender" || S.phone ? "Andá a Vender para cargarla en un pedido" : "Se carga en el pedido y se marca Envío";
+}
+function applyDroppedLocation(text, e) {
+  if (!text) return;
+  if (S.phone) { toast("Las ubicaciones se cargan desde la caja (PC).", "bad"); return; }
+  if (S.status !== "ready" && S.status !== "slow") return;
+  if (savedOpen()) {
+    const row = dropTarget(e);
+    if (!row) { toast("Soltá la ubicación sobre un ticket de la lista.", "bad"); return; }
+    const s = S.sales.find(x => x.id === row.dataset.sid); if (!s || !isPending(s)) return;
+    const had = s.mode === "envio" && String(s.address || "").trim() && s.address.trim() !== text;
+    queue("update", "sales/" + s.id, {mode: "envio", address: text}, `Ubicación del ticket #${s.num}`);
+    syncDelivery({...s, mode: "envio", address: text});
+    if (S.editId === s.id) { S.mode = "envio"; S.addr = text; }
+    if (S.savedRefresh) S.savedRefresh();
+    toast(`${had ? "Ubicación reemplazada" : "Ubicación cargada"} en el ticket #${s.num}${s.note ? " de " + s.note : ""}`);
+    return;
+  }
+  if (!$("#modal").hidden) { toast("Cerrá la ventana abierta y volvé a soltar la ubicación.", "bad"); return; }
+  if (S.view !== "vender") { toast("Andá a Vender para cargar la ubicación en un pedido.", "bad"); return; }
+  if (!currentShift()) { toast("Abrí el turno para cargar pedidos.", "bad"); return; }
+  const had = S.mode === "envio" && S.addr.trim() && S.addr.trim() !== text;
+  S.mode = "envio"; S.addr = text; render();
+  const info = $("#addr-info"); if (info) fx(info, "fx-bump");
+  toast((had ? "Ubicación reemplazada" : "Ubicación cargada en el pedido · Envío") + (S.editId ? " · tocá Guardar ticket para guardar el cambio" : ""));
+}
+document.addEventListener("dragenter", e => { if (!dragHasText(e)) return; e.preventDefault(); dragDepth++; showDropzone(true, e); });
+document.addEventListener("dragover", e => { if (!dragHasText(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; showDropzone(true, e); });
+document.addEventListener("dragleave", e => { if (!dragHasText(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) showDropzone(false); });
+document.addEventListener("drop", e => {
+  if (!dragHasText(e)) return;
+  e.preventDefault(); // evita que el navegador abra el enlace y salga de la caja
+  dragDepth = 0; const txt = droppedText(e.dataTransfer);
+  applyDroppedLocation(txt, e); showDropzone(false);
+});
+window.addEventListener("dragend", () => { dragDepth = 0; showDropzone(false); });
+
 document.addEventListener("focusout", e => { if (e.target.id === "shiftnotes") { saveNotesNow(); S.notesDraft = null; } });
 
 /* ---------- Inventario ---------- */
