@@ -97,7 +97,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--muted);padding:6px 2p
 <body>
 <div id="login" class="login" hidden></div>
 <div id="app" hidden>
-  <header class="top"><h1>Mis envíos</h1><span id="count" class="pill off"></span><span class="sp"></span><span id="net"></span><button class="btn sm ghost" id="bell" hidden>Activar avisos</button><button class="btn sm ghost" id="logout">Salir</button></header>
+  <header class="top"><h1>Mis envíos</h1><span id="count" class="pill off"></span><span class="sp"></span><span id="net"></span><button class="btn sm ghost" id="logout">Salir</button></header>
   <main id="main"><p class="hint">Cargando…</p></main>
 </div>
 <div id="sheet" hidden></div>
@@ -157,45 +157,10 @@ AUTH.onAuthStateChanged(u => {
 });
 $("#logout").onclick = () => AUTH.signOut().then(() => location.reload());
 
-/* ---------- Avisos ----------
-   Con la página abierta (o recién minimizada) avisa con notificación, vibración y sonido cuando llega un envío nuevo,
-   y avisa si el local quitó uno. Con el teléfono bloqueado o la página cerrada, el aviso llega por Telegram (lo manda la caja). */
-const canNotify = () => "Notification" in window;
-function updateBell() { const b = $("#bell"); b.hidden = !canNotify() || Notification.permission !== "default"; }
-$("#bell").onclick = async () => {
-  try { await Notification.requestPermission(); } catch (e) {}
-  updateBell(); beep(true);
-  if (canNotify() && Notification.permission === "granted") toast("Avisos activados"); else toast("El navegador no dejó activar los avisos.", "bad");
-};
-updateBell();
-let audioCtx = null;
-function beep(silent) {
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    if (silent) return;
-    [0, 0.28].forEach(t => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.0001, audioCtx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.4, audioCtx.currentTime + t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + t + 0.22);
-      o.start(audioCtx.currentTime + t); o.stop(audioCtx.currentTime + t + 0.25); });
-  } catch (e) {}
-}
-document.addEventListener("pointerdown", () => beep(true), {once: true}); // los navegadores solo dejan sonar después de un toque
-async function notify(title, body, tag) {
-  try { navigator.vibrate && navigator.vibrate([250, 120, 250]); } catch (e) {}
-  beep();
-  if (!canNotify() || Notification.permission !== "granted") return;
-  try {
-    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration("../");
-    if (reg) await reg.showNotification(title, {body, tag, icon: "../icon-192.png", badge: "../icon-192.png", renotify: true, data: {url: location.href}});
-    else new Notification(title, {body, tag, icon: "../icon-192.png"});
-  } catch (e) {}
-}
+// Si el local quita un envío pendiente, se avisa en pantalla y se cierra la hoja si estaba abierta.
 function checkChanges(fromCache) {
-  // known: todos los envíos ya vistos (con su estado). Nuevo = id que nunca se vio. Quitado = estaba pendiente y desapareció.
   const now = new Map(list.map(d => [d.id, d]));
   if (known && !fromCache) {
-    now.forEach((d, id) => { if (!known.has(id) && d.status === "asignado" && Date.now() - (d.assignedAt || 0) < 3600e3)
-      notify(`Nuevo envío #${d.num}`, (d.pay && d.pay.status === "paid" ? "Ya pagado · " : "Cobrar ") + fmt(d.total), "envio-" + id); });
     known.forEach((d, id) => { if (!now.has(id) && d.status !== "entregado") {
       toast(`El local quitó el envío #${d.num}`, "bad");
       const sh = $("#sheet"); if (!sh.hidden && sh.dataset.id === id) closeSheet();
