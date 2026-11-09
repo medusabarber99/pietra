@@ -159,7 +159,7 @@ $("#logout").onclick = () => AUTH.signOut().then(() => location.reload());
 
 /* ---------- Avisos ----------
    Con la página abierta (o recién minimizada) avisa con notificación, vibración y sonido cuando llega un envío nuevo,
-   y avisa si el local quitó uno. Con el teléfono bloqueado o la página cerrada, el aviso llega por la app ntfy. */
+   y avisa si el local quitó uno. Con el teléfono bloqueado o la página cerrada, el aviso llega por Telegram (lo manda la caja). */
 const canNotify = () => "Notification" in window;
 function updateBell() { const b = $("#bell"); b.hidden = !canNotify() || Notification.permission !== "default"; }
 $("#bell").onclick = async () => {
