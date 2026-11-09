@@ -810,6 +810,10 @@ function render() {
     ? (sh ? `<span class="pill ok">${S.phone ? "Abierto" : "Turno abierto"} · ${hhmm(sh.openedAt)}</span>` : `<span class="pill off">${S.phone ? "Cerrado" : "Turno cerrado"}</span>`) : "";
 
   renderSync();
+  // Si el ticket que se estaba editando ya no existe (se eliminó), se limpia el pedido en pantalla, dirección incluida.
+  if (S.editId && S.status === "ready" && !S.sales.some(x => x.id === S.editId)) { resetCart(); toast("El ticket que estabas editando ya no está"); }
+  // La lista de Guardados (si está abierta) se actualiza junto con la pantalla: asignar, quitar, entregar, eliminar.
+  if (S.savedRefresh && !$("#modal").hidden) S.savedRefresh();
   let banner = "";
   if (S.updateReady) banner = `<p class="banner"><span><strong>Hay una versión nueva de la app.</strong> Tocá Actualizar para verla${OB.ops.length ? " (los cambios sin sincronizar se conservan)" : ""}.</span><button class="btn sm primary" data-act="app-update">Actualizar</button></p>`;
   else
@@ -1195,6 +1199,28 @@ function assignDelivery(id) {
   if (!String(s.address || "").trim()) { toast("El pedido no tiene dirección o ubicación. Abrilo y pegala antes de asignarlo.", "bad"); return; }
   queue("set", "deliveries/" + id, {...deliveryFields(s), cadete: email, status: "asignado", assignedAt: Date.now(), deliveredAt: null, collected: null}, `Envío #${s.num} asignado al cadete`);
   toast(`Pedido #${s.num} asignado al cadete`);
+  notifyCadete(s);
+}
+/* Aviso push al celular del cadete con ntfy (gratis, sin cuenta): la caja publica en un canal privado
+   (nombre largo al azar) y la app ntfy del cadete, suscrita a ese canal, muestra la notificación aunque
+   el teléfono esté bloqueado. El aviso no lleva nombre ni dirección del cliente: solo número y monto. */
+const ntfyTopic = () => String(S.settings.ntfyTopic || "").trim();
+const cadeteUrl = () => location.origin + location.pathname.replace(/[^/]*$/, "") + "cadete/";
+async function sendNtfy(topic, title, message, tries = 3) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const r = await fetch("https://ntfy.sh/", {method: "POST", body: JSON.stringify({topic, title, message, tags: ["pizza"], priority: 4, click: cadeteUrl()})});
+      if (r.ok) return true;
+    } catch (e) {}
+    await new Promise(r => setTimeout(r, 4000 * (i + 1)));
+  }
+  return false;
+}
+function notifyCadete(s) {
+  const topic = ntfyTopic(); if (!topic) return;
+  const paid = s.status !== "pending";
+  sendNtfy(topic, `Nuevo envío #${s.num}`, paid ? `Ya pagado · ${fmt(s.total)}` : `Cobrar ${fmt(s.total)}`)
+    .then(ok => { if (!ok) toast(`No se pudo mandar el aviso del envío #${s.num} al celular del cadete (sin internet). El envío igual le aparece en su página.`, "warn"); });
 }
 function unassignDelivery(id) {
   const d = deliveryOf(id); if (!d || d.status === "entregado") return;
@@ -1203,8 +1229,11 @@ function unassignDelivery(id) {
 // Mantiene la ficha al día si el pedido cambia (productos, dirección, cobro) o se borra/anula.
 function syncDelivery(sale, removed = false) {
   if (!sale || !sale.id) return;
-  const d = deliveryOf(sale.id); if (!d || d.status === "entregado") return;
-  if (removed || sale.cancelled || sale.mode !== "envio") { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
+  const d = deliveryOf(sale.id); if (!d) return;
+  // Ticket eliminado o anulado: la ficha (con su dirección) se borra siempre, también si ya estaba entregada.
+  if (removed || sale.cancelled) { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
+  if (d.status === "entregado") return;
+  if (sale.mode !== "envio") { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
   queue("update", "deliveries/" + sale.id, deliveryFields(sale), `Envío #${d.num} actualizado`);
 }
 // Avisa en la caja cuando el cadete marca un envío como entregado y lo anota en la venta.
@@ -1352,8 +1381,11 @@ function openDeleteTicket(id) {
     <div class="actions end"><button class="btn ghost" data-act="close-modal">No eliminar</button><button class="btn primary" id="dok">Eliminar ticket</button></div>`,
     {onMount: d => d.querySelector("#dok").onclick = async e => {
       e.target.disabled = true;
-      const ok = queue("delete", "sales/" + id, null, `Ticket #${s.num} eliminado`); toast(`Ticket #${s.num} eliminado`); syncDelivery(s, true);
-      if (ok) { if (S.editId === id) resetCart(); closeModal(); } else e.target.disabled = false;
+      // Primero se limpia el pedido en pantalla (productos, nombre, dirección o enlace) para que no quede en el campo.
+      if (S.editId === id) resetCart();
+      closeModalSilently();
+      syncDelivery(s, true); // la ficha del cadete se borra junto con el ticket
+      queue("delete", "sales/" + id, null, `Ticket #${s.num} eliminado`); toast(`Ticket #${s.num} eliminado`);
     }});
 }
 
@@ -2054,7 +2086,9 @@ function viewConfig() {
         <label class="field"><span>Correo de la cuenta del cadete</span><input id="c-cademail" class="text" type="email" value="${esc(st.cadeteEmail || "")}" placeholder="cadete@pietra.uy" autocomplete="off"></label>
         <label class="field"><span>Ciudad que se agrega a las direcciones escritas</span><input id="c-city" class="text" value="${esc(st.deliveryCity ?? "Ciudad del Plata, San José")}" placeholder="Ciudad del Plata, San José"></label>
         <p class="hint" style="margin:0">El cadete entra con su correo y contraseña en <strong id="c-cadlink">${esc(location.origin + location.pathname.replace(/[^/]*$/, "") + "cadete/")}</strong>. Solo ve sus envíos pendientes: no ve ventas, turnos ni configuración.</p>
-        <div class="actions end"><button class="btn" id="c-copycad">Copiar enlace</button><button class="btn primary" id="c-save-cad">Guardar</button></div>
+        <label class="field"><span>Canal de avisos al celular (ntfy)</span><input id="c-ntfy" class="text" value="${esc(st.ntfyTopic || "")}" placeholder="Tocá Generar canal" autocomplete="off" spellcheck="false"></label>
+        <p class="hint" style="margin:0">Para que al cadete le suene una notificación cuando le asignás un envío: en su celular instalá la app gratuita <strong>ntfy</strong> (App Store / Play Store), tocá <strong>+</strong> y suscribite a este canal. El aviso dice solo el número de pedido y el monto.</p>
+        <div class="actions end"><button class="btn" id="c-copycad">Copiar enlace</button><button class="btn" id="c-genntfy">Generar canal</button><button class="btn" id="c-testntfy">Probar aviso</button><button class="btn primary" id="c-save-cad">Guardar</button></div>
       </div></div>
 
       <div class="card"><header><h3>Apariencia</h3></header><div class="body">
@@ -2127,8 +2161,23 @@ function mountConfig() {
   m.querySelector("#c-save-cad").onclick = async () => {
     const email = m.querySelector("#c-cademail").value.trim().toLowerCase();
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Ese correo no parece válido.", "bad"); return; }
-    const ok = await setSetting({cadeteEmail: email, deliveryCity: m.querySelector("#c-city").value.trim()});
+    const topic = m.querySelector("#c-ntfy").value.trim();
+    if (topic && !/^[A-Za-z0-9_-]{12,64}$/.test(topic)) { toast("El canal debe tener al menos 12 letras o números (sin espacios). Tocá Generar canal.", "bad"); return; }
+    const ok = await setSetting({cadeteEmail: email, deliveryCity: m.querySelector("#c-city").value.trim(), ntfyTopic: topic});
     if (ok) toast("Datos del cadete guardados");
+  };
+  m.querySelector("#c-genntfy").onclick = () => {
+    const a = new Uint8Array(12); crypto.getRandomValues(a);
+    m.querySelector("#c-ntfy").value = "pietra-" + [...a].map(b => "abcdefghijkmnpqrstuvwxyz23456789"[b % 32]).join("");
+    toast("Canal generado: tocá Guardar y suscribí el celular del cadete a ese canal");
+  };
+  m.querySelector("#c-testntfy").onclick = async e => {
+    const topic = m.querySelector("#c-ntfy").value.trim();
+    if (!topic) { toast("Primero generá el canal.", "bad"); return; }
+    e.target.disabled = true;
+    const ok = await sendNtfy(topic, "Prueba de Pietra", "Si ves esto, los avisos de envíos funcionan", 1);
+    e.target.disabled = false;
+    toast(ok ? "Aviso de prueba enviado: debería sonar en el celular del cadete" : "No se pudo mandar el aviso. Revisá la conexión.", ok ? "" : "bad");
   };
   m.querySelector("#c-copycad").onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector("#c-cadlink").textContent); toast("Enlace copiado"); } catch (e) { toast("No se pudo copiar: seleccioná el enlace y copialo a mano.", "bad"); } };
   m.querySelector("#c-save-auth").onclick = async () => {

@@ -97,7 +97,7 @@ details summary{cursor:pointer;font-weight:600;color:var(--muted);padding:6px 2p
 <body>
 <div id="login" class="login" hidden></div>
 <div id="app" hidden>
-  <header class="top"><h1>Mis envíos</h1><span id="count" class="pill off"></span><span class="sp"></span><span id="net"></span><button class="btn sm ghost" id="logout">Salir</button></header>
+  <header class="top"><h1>Mis envíos</h1><span id="count" class="pill off"></span><span class="sp"></span><span id="net"></span><button class="btn sm ghost" id="bell" hidden>Activar avisos</button><button class="btn sm ghost" id="logout">Salir</button></header>
   <main id="main"><p class="hint">Cargando…</p></main>
 </div>
 <div id="sheet" hidden></div>
@@ -131,7 +131,7 @@ const ICON = {
   map: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.3-7-12a7 7 0 0 1 14 0c0 5.7-7 12-7 12z"/><circle cx="12" cy="9" r="2.5"/></svg>',
   ok: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>'
 };
-let FS, AUTH, list = [], seen = new Set(), pendingWrites = false, unsub = null;
+let FS, AUTH, list = [], seen = new Set(), pendingWrites = false, unsub = null, known = null;
 function toast(msg, kind) { const t = document.createElement("div"); t.className = "toast " + (kind || ""); t.textContent = msg; $("#toast").appendChild(t); setTimeout(() => t.remove(), 3500); }
 
 firebase.initializeApp(FIREBASE_CONFIG);
@@ -149,12 +149,60 @@ AUTH.onAuthStateChanged(u => {
     .onSnapshot({includeMetadataChanges: true}, snap => {
       list = snap.docs.map(d => ({id: d.id, ...d.data()}));
       pendingWrites = snap.metadata.hasPendingWrites;
+      checkChanges(snap.metadata.fromCache);
       render();
     }, err => {
       $("#main").innerHTML = `<div class="empty"><strong>No se pueden ver los envíos.</strong><br>${err && err.code === "permission-denied" ? "Esta cuenta no tiene permiso. Pedile al local que revise las reglas de Firebase." : "Revisá la conexión e intentá de nuevo."}</div>`;
     });
 });
 $("#logout").onclick = () => AUTH.signOut().then(() => location.reload());
+
+/* ---------- Avisos ----------
+   Con la página abierta (o recién minimizada) avisa con notificación, vibración y sonido cuando llega un envío nuevo,
+   y avisa si el local quitó uno. Con el teléfono bloqueado o la página cerrada, el aviso llega por la app ntfy. */
+const canNotify = () => "Notification" in window;
+function updateBell() { const b = $("#bell"); b.hidden = !canNotify() || Notification.permission !== "default"; }
+$("#bell").onclick = async () => {
+  try { await Notification.requestPermission(); } catch (e) {}
+  updateBell(); beep(true);
+  if (canNotify() && Notification.permission === "granted") toast("Avisos activados"); else toast("El navegador no dejó activar los avisos.", "bad");
+};
+updateBell();
+let audioCtx = null;
+function beep(silent) {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    if (silent) return;
+    [0, 0.28].forEach(t => { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.0001, audioCtx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.4, audioCtx.currentTime + t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + t + 0.22);
+      o.start(audioCtx.currentTime + t); o.stop(audioCtx.currentTime + t + 0.25); });
+  } catch (e) {}
+}
+document.addEventListener("pointerdown", () => beep(true), {once: true}); // los navegadores solo dejan sonar después de un toque
+async function notify(title, body, tag) {
+  try { navigator.vibrate && navigator.vibrate([250, 120, 250]); } catch (e) {}
+  beep();
+  if (!canNotify() || Notification.permission !== "granted") return;
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration("../");
+    if (reg) await reg.showNotification(title, {body, tag, icon: "../icon-192.png", badge: "../icon-192.png", renotify: true, data: {url: location.href}});
+    else new Notification(title, {body, tag, icon: "../icon-192.png"});
+  } catch (e) {}
+}
+function checkChanges(fromCache) {
+  // known: todos los envíos ya vistos (con su estado). Nuevo = id que nunca se vio. Quitado = estaba pendiente y desapareció.
+  const now = new Map(list.map(d => [d.id, d]));
+  if (known && !fromCache) {
+    now.forEach((d, id) => { if (!known.has(id) && d.status === "asignado" && Date.now() - (d.assignedAt || 0) < 3600e3)
+      notify(`Nuevo envío #${d.num}`, (d.pay && d.pay.status === "paid" ? "Ya pagado · " : "Cobrar ") + fmt(d.total), "envio-" + id); });
+    known.forEach((d, id) => { if (!now.has(id) && d.status !== "entregado") {
+      toast(`El local quitó el envío #${d.num}`, "bad");
+      const sh = $("#sheet"); if (!sh.hidden && sh.dataset.id === id) closeSheet();
+    } });
+  }
+  if (!fromCache || !known) known = now;
+}
 window.addEventListener("online", render); window.addEventListener("offline", render);
 setInterval(render, 60000);
 
@@ -210,7 +258,7 @@ function openDeliver(d) {
     ${paid ? `<p class="hint">Ya está pagado. Confirmá cuando lo hayas entregado.</p><button class="btn ok" data-c="">${ICON.ok}Confirmar entrega</button>`
            : `<p class="hint">¿Cómo cobraste <strong>${fmt(d.total)}</strong>?</p><div class="choices"><button class="btn primary" data-c="efectivo">Efectivo</button><button class="btn" data-c="pos">POS</button></div>`}
     <button class="btn ghost" data-x>Volver</button></div>`;
-  s.hidden = false;
+  s.hidden = false; s.dataset.id = d.id;
   s.querySelector(".bg").onclick = closeSheet; s.querySelector("[data-x]").onclick = closeSheet;
   s.querySelectorAll("[data-c]").forEach(b => b.onclick = () => deliver(d, b.dataset.c || null));
 }
