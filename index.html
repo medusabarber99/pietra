@@ -192,6 +192,10 @@ main{overflow:auto;min-height:0}
 .search input{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px 10px 36px}
 .search::before{content:"";position:absolute;left:13px;top:50%;width:11px;height:11px;border:2px solid var(--muted);border-radius:50%;transform:translateY(-60%)}
 .search::after{content:"";position:absolute;left:24px;top:58%;width:6px;height:2px;background:var(--muted);transform:rotate(45deg)}
+.zonemap{height:380px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--sunk)}
+.zpt{background:#fff;border:3px solid #C2311F;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.tripbtn{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:8px 6px 8px 14px;font-weight:700;cursor:pointer;display:inline-flex;gap:10px;align-items:center}
+.tripbtn span{background:var(--ink);color:var(--surface);border-radius:8px;padding:2px 10px;font-size:13px}
 .kitchenbtn{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
 .kitchenbtn .n{background:var(--ink);color:var(--surface);border-radius:999px;padding:0 8px;font-size:13px}
 .kitchenbtn.zero .n{background:var(--sunk);color:var(--muted)}
@@ -511,7 +515,7 @@ function looksLikePhone() {
 function detectPhone() { const m = S.devMode || deviceSetting(); return m === "phone" ? true : m === "pc" ? false : looksLikePhone(); }
 const viewsHere = () => S.phone ? VIEWS.filter(v => v[0] !== "vender") : VIEWS;
 // Acciones de venta y cobro que no se hacen desde el celular.
-const PC_ONLY = new Set(["kitchen", "kready", "kundo", "add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit", "assign", "unassign"]);
+const PC_ONLY = new Set(["trip-back", "kitchen", "kready", "kundo", "add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit", "assign", "unassign"]);
 const NAV_ICONS = {
   ventas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"></path><path d="M9 7h6M9 11h6M9 15h4"></path></svg>',
   turno: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
@@ -581,7 +585,11 @@ function summarize(sales, opening, cadeteFijo = null) {
   const ok = sales.filter(isPaid);
   const pend = sales.filter(isPending);
   const canc = sales.filter(s => s.cancelled);
-  const far = sales.filter(s => !s.cancelled && s.far);
+  // Envío lejano: se paga una vez por SALIDA del cadete (tripId). Varios pedidos lejanos en la misma salida = un solo extra.
+  // Los envíos lejanos sin salida (no asignados por la app) cuentan uno por uno, como antes.
+  const farGroups = {};
+  sales.filter(s => !s.cancelled && s.far).forEach(s => { const k = s.tripId ? "t:" + s.tripId : "s:" + s.id; farGroups[k] = Math.max(farGroups[k] || 0, Number(s.farFee) || FAR_DEFAULT); });
+  const far = Object.values(farGroups).map(fee => ({farFee: fee}));
   const sum = arr => arr.reduce((t, s) => t + (Number(s.total) || 0), 0);
   const prod = {};
   ok.forEach(s => (s.items || []).forEach(it => {
@@ -878,6 +886,7 @@ function viewSell() {
   const toolbar = `<div class="toolbar">
       <label class="search"><input id="q" type="search" placeholder="Buscar producto…" value="${esc(S.q)}" aria-label="Buscar producto" autocomplete="off"></label>
       ${(() => { const late = pendingTickets().filter(isStale).length; return `<button class="savedbtn ${pendN ? "" : "zero"} ${late ? "late" : ""}" data-act="saved" ${late ? `aria-label="Guardados: ${pendN}, ${late} con más de ${STALE_MIN} minutos sin cobrar"` : ""}>Guardados <span class="n">${pendN}</span>${late ? `<span class="late-tag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg>${late} +${STALE_MIN} min</span>` : ""}<kbd class="kbd-hint">F8</kbd></button>`; })()}
+      ${(() => { const t = openTripId(); if (!t) return ""; const n = tripOpen().filter(d => d.tripId === t).length; return `<button class="tripbtn" data-act="trip-back" title="El cadete está en una salida. Tocá cuando vuelva (se cierra sola al cobrar sus pedidos).">Cadete en salida · ${n} <span>Volvió</span></button>`; })()}
       ${(() => { const n = kitchenCooking().length; return `<button class="kitchenbtn ${n ? "" : "zero"}" data-act="kitchen" title="Pedidos en preparación">Cocina <span class="n">${n}</span><kbd class="kbd-hint">F9</kbd></button>`; })()}
     </div>`;
   let catalog;
@@ -986,8 +995,8 @@ function tilesHtml(sum, withCash) {
     <div class="tile"><span>POS</span><strong>${fmt(sum.pos)}</strong><small>${plural(sum.posCount, "venta", "ventas")}</small></div>
     ${sum.pendingCount ? `<div class="tile"><span>Por cobrar</span><strong>${fmt(sum.pendingTotal)}</strong><small>${plural(sum.pendingCount, "ticket guardado", "tickets guardados")}</small></div>` : ""}
     ${withCash ? `<div class="tile"><span>Efectivo esperado en caja</span><strong>${fmt(sum.expectedCash)}</strong><small>Fondo ${fmt(sum.opening)} + efectivo</small></div>` : ""}
-    ${sum.cadeteTotal != null ? `<div class="tile cadete"><span>Pagar al cadete</span><strong>${fmt(sum.cadeteTotal)}</strong><small>Fijo ${fmt(sum.cadeteBase)} + ${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>`
-      : farCount || sum.tipTotal ? `<div class="tile cadete"><span>Para el cadete</span><strong>${fmt(farTotal + (sum.tipTotal || 0))}</strong><small>${plural(farCount, "envío lejano", "envíos lejanos")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>` : ""}
+    ${sum.cadeteTotal != null ? `<div class="tile cadete"><span>Pagar al cadete</span><strong>${fmt(sum.cadeteTotal)}</strong><small>Fijo ${fmt(sum.cadeteBase)} + ${plural(farCount, "salida lejana", "salidas lejanas")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>`
+      : farCount || sum.tipTotal ? `<div class="tile cadete"><span>Para el cadete</span><strong>${fmt(farTotal + (sum.tipTotal || 0))}</strong><small>${plural(farCount, "salida lejana", "salidas lejanas")} (${fmt(farTotal)})${sum.tipTotal ? ` + ${plural(sum.tipCount, "propina", "propinas")} con tarjeta (${fmt(sum.tipTotal)})` : ""} · aparte de las ventas</small></div>` : ""}
     ${sum.cancelledCount ? `<div class="tile"><span>Anuladas</span><strong>${sum.cancelledCount}</strong><small>${fmt(sum.cancelledTotal)} no cobrados</small></div>` : ""}
   </div>`;
 }
@@ -999,7 +1008,7 @@ function cadeteBreakdownHtml(sum, sh) {
   return `<div class="card"><header><h3>Pago al cadete</h3><span class="muted">Aparte de las ventas: no suma ni resta del total</span></header>
     <div class="tablewrap"><table><tbody>
       <tr><td>Monto fijo del turno</td><td class="num">${fmt(base)}</td></tr>
-      <tr><td>Envíos lejanos (${sum.farCount || 0} × ${fmt(farFee())})</td><td class="num">${fmt(sum.farTotal)}</td></tr>
+      <tr><td>Salidas lejanas (${sum.farCount || 0} × ${fmt(farFee())}) · varios pedidos lejanos en la misma salida pagan una vez</td><td class="num">${fmt(sum.farTotal)}</td></tr>
       <tr><td>Propinas del delivery con tarjeta (${sum.tipCount || 0})</td><td class="num">${fmt(sum.tipTotal || 0)}</td></tr>
       <tr class="totrow"><td><strong>Total a pagar al cadete</strong></td><td class="num"><strong>${fmt(total)}</strong></td></tr>
     </tbody></table></div></div>`;
@@ -1196,10 +1205,36 @@ function checkStale() {
 const deliveryCity = () => (S.settings.deliveryCity ?? "Ciudad del Plata, San José").trim();
 const cadeteEmail = () => String(S.settings.cadeteEmail || "").trim().toLowerCase();
 const deliveryOf = id => (S.deliveries || []).find(d => d.id === id) || null;
+/* ---------- Zona de envíos ----------
+   settings.zone = [{lat, lng}, …]: borde de la zona NORMAL dibujado en Configuración. Fuera de la zona = envío lejano. */
+const deliveryZone = () => { const z = S.settings.zone; return Array.isArray(z) && z.length >= 3 ? z : null; };
+function pointInZone(lat, lng, zone) {
+  let inside = false;
+  for (let i = 0, j = zone.length - 1; i < zone.length; j = i++) {
+    const a = zone[i], b = zone[j];
+    if ((a.lat > lat) !== (b.lat > lat) && lng < (b.lng - a.lng) * (lat - a.lat) / (b.lat - a.lat) + a.lng) inside = !inside;
+  }
+  return inside;
+}
+// true = dentro de la zona normal, false = fuera (lejano), null = no se puede saber (sin zona o sin punto exacto).
+function zoneCheck(raw) {
+  const z = deliveryZone(); if (!z || !String(raw || "").trim()) return null;
+  const L = Ubicacion.parse(raw, deliveryCity());
+  return L.kind === "coords" ? pointInZone(L.lat, L.lng, z) : null;
+}
+// Marca o desmarca solo el envío lejano según la zona, salvo que se haya tocado a mano en este pedido.
+function autoFar() {
+  if (S.mode !== "envio" || S.farManual) return;
+  const r = zoneCheck(S.addr); if (r === null) return;
+  S.far = !r; const box = $("#far"); if (box) box.checked = S.far;
+}
 function locInfoHtml(raw) {
   if (!String(raw || "").trim()) return `<span class="muted">Ej.: Calle 5 1234 · un enlace de Google Maps · la ubicación que mandó el cliente por WhatsApp</span>`;
   const L = Ubicacion.parse(raw, deliveryCity()), d = Ubicacion.describe(L), w = Ubicacion.wazeUrl(L), m = Ubicacion.mapsUrl(L);
-  return `<span class="pill ${d.ok ? "ok" : "warn"} plain">${esc(d.label)}</span> <span class="muted">${esc(d.detail)}</span>
+  const z = deliveryZone(), r = zoneCheck(raw);
+  const zone = !z ? "" : r === true ? ` <span class="pill ok plain">Dentro de la zona</span>` : r === false ? ` <span class="pill warn plain">Fuera de la zona → envío lejano</span>`
+    : ` <span class="muted">· Zona: no se puede calcular sin un punto exacto; marcá el envío lejano a mano si corresponde.</span>`;
+  return `<span class="pill ${d.ok ? "ok" : "warn"} plain">${esc(d.label)}</span> <span class="muted">${esc(d.detail)}</span>${zone}
     <span class="loclinks">${w ? `<a href="${esc(w)}" target="_blank" rel="noopener">Probar en Waze</a>` : ""}${m ? `<a href="${esc(m)}" target="_blank" rel="noopener">Ver en Maps</a>` : ""}</span>`;
 }
 function deliveryFields(sale) {
@@ -1211,59 +1246,77 @@ function deliveryFields(sale) {
     pay: paid ? {status: "paid", method: sale.payment || null} : {status: "pending"}
   };
 }
+/* Salidas del cadete: todo lo que se le asigna mientras tiene una salida abierta va en esa salida (tripId).
+   La salida se cierra sola cuando la caja cobra todo lo que había que cobrar (los ya pagados se le borran también),
+   o con "Volvió el cadete". El cadete no marca nada: ve sus envíos y se le borran cuando la caja los cobra. */
+const cadeteDeliveries = () => { const e = cadeteEmail(); return (S.deliveries || []).filter(d => d.cadete === e); };
+const tripOpen = () => cadeteDeliveries().filter(d => d.tripId && !d.tripClosed);
+function openTripId() { const o = tripOpen().sort((a, b) => (b.assignedAt || 0) - (a.assignedAt || 0)); return o.length ? o[0].tripId : null; }
 function assignDelivery(id) {
   const s = S.sales.find(x => x.id === id); if (!s || s.cancelled) return;
   const email = cadeteEmail();
   if (!email) { toast("Primero cargá el correo del cadete en Configuración → Cadete.", "bad"); return; }
   if (!String(s.address || "").trim()) { toast("El pedido no tiene dirección o ubicación. Abrilo y pegala antes de asignarlo.", "bad"); return; }
-  queue("set", "deliveries/" + id, {...deliveryFields(s), cadete: email, status: "asignado", assignedAt: Date.now(), deliveredAt: null, collected: null}, `Envío #${s.num} asignado al cadete`);
-  toast(`Pedido #${s.num} asignado al cadete`);
+  const open = openTripId(), tripId = open || "t" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const others = open ? tripOpen().filter(d => d.tripId === open && d.id !== id).length : 0;
+  queue("set", "deliveries/" + id, {...deliveryFields(s), cadete: email, status: "asignado", tripId, tripClosed: false, assignedAt: Date.now()}, `Envío #${s.num} asignado al cadete`);
+  queue("update", "sales/" + id, {tripId}, `Envío #${s.num}: salida del cadete`);
+  toast(`Pedido #${s.num} asignado al cadete · ${others ? `misma salida que ${others === 1 ? "otro pedido" : others + " pedidos"}` : "salida nueva"}`);
 }
 function unassignDelivery(id) {
-  const d = deliveryOf(id); if (!d || d.status === "entregado") return;
-  queue("delete", "deliveries/" + id, null, `Envío #${d.num} sin asignar`); toast("Se quitó la asignación");
+  const d = deliveryOf(id); if (!d) return;
+  queue("delete", "deliveries/" + id, null, `Envío #${d.num} sin asignar`);
+  queue("update", "sales/" + id, {tripId: null}, `Envío #${d.num} sin salida`);
+  toast("Se quitó la asignación");
 }
-// Mantiene la ficha al día si el pedido cambia (productos, dirección, cobro) o se borra/anula.
-function syncDelivery(sale, removed = false) {
+// Cuando no queda nada por cobrar en la salida, el cadete volvió: se le borran también los que ya estaban pagos.
+function closeTripIfDone(tripId, exceptId) {
+  if (!tripId) return;
+  const rest = (S.deliveries || []).filter(d => d.tripId === tripId && d.id !== exceptId);
+  if (rest.length && rest.every(d => d.pay && d.pay.status === "paid")) rest.forEach(d => queue("delete", "deliveries/" + d.id, null, `Envío #${d.num} terminado`));
+}
+// "Volvió el cadete": cierra la salida abierta. Los pagados se le borran; los que faltan cobrar quedan en la caja (y se le ocultan).
+function tripBack() {
+  const open = openTripId(); if (!open) return;
+  const list = tripOpen().filter(d => d.tripId === open);
+  list.forEach(d => { if (d.pay && d.pay.status === "paid") queue("delete", "deliveries/" + d.id, null, `Envío #${d.num} terminado`);
+    else queue("update", "deliveries/" + d.id, {tripClosed: true}, `Envío #${d.num}: el cadete volvió`); });
+  const unpaid = list.filter(d => !(d.pay && d.pay.status === "paid")).length;
+  toast(`Salida terminada${unpaid ? ` · quedan ${unpaid} por cobrar en Guardados` : ""}. Lo próximo que asignes es una salida nueva.`);
+}
+function openTripBack() {
+  const open = openTripId(); if (!open) return;
+  const list = tripOpen().filter(d => d.tripId === open);
+  openModal("¿Volvió el cadete?", `<p class="hint" style="margin:0">Cierra la salida actual: se le borran los envíos de su pantalla y lo próximo que asignes cuenta como una salida nueva. Normalmente no hace falta: la salida se cierra sola cuando cobrás todos sus pedidos.</p>
+    <ul>${list.map(d => `<li>#${d.num ?? ""} ${esc(d.name || "")} · ${d.pay && d.pay.status === "paid" ? "ya pagado" : "falta cobrar " + fmt(d.total)}</li>`).join("")}</ul>
+    <div class="actions end"><button class="btn ghost" data-act="close-modal">Cancelar</button><button class="btn primary" id="tbok">Sí, volvió</button></div>`,
+    {onMount: d => d.querySelector("#tbok").onclick = () => { closeModal(); tripBack(); }});
+}
+// Mantiene la ficha al día si el pedido cambia; al cobrarlo en la caja se le borra al cadete.
+function syncDelivery(sale, removed = false, charged = false) {
   if (!sale || !sale.id) return;
   const d = deliveryOf(sale.id); if (!d) return;
-  // Ticket eliminado o anulado: la ficha (con su dirección) se borra siempre, también si ya estaba entregada.
-  if (removed || sale.cancelled) { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
-  if (d.status === "entregado") return;
-  if (sale.mode !== "envio") { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); return; }
+  if (removed || sale.cancelled) { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); queue("update", "sales/" + sale.id, {tripId: null}, `Envío #${d.num} sin salida`); return; }
+  if (sale.mode !== "envio") { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} quitado`); queue("update", "sales/" + sale.id, {tripId: null}, `Envío #${d.num} sin salida`); return; }
+  if (charged) { queue("delete", "deliveries/" + sale.id, null, `Envío #${d.num} cobrado`); closeTripIfDone(d.tripId, sale.id); return; }
   queue("update", "deliveries/" + sale.id, deliveryFields(sale), `Envío #${d.num} actualizado`);
 }
-// Avisa en la caja cuando el cadete marca un envío como entregado y lo anota en la venta.
-let deliveryStatusSeen = null;
-const deliveredNotified = new Set();
-function watchDeliveries(fromCache) {
-  const prev = deliveryStatusSeen;
-  deliveryStatusSeen = new Map((S.deliveries || []).map(d => [d.id, d.status])); // antes de avisar: evita avisos repetidos
-  if (prev && !fromCache) {
-    (S.deliveries || []).forEach(d => {
-      if (d.status === "entregado" && prev.get(d.id) === "asignado" && !deliveredNotified.has(d.id + ":" + d.deliveredAt)) {
-        deliveredNotified.add(d.id + ":" + d.deliveredAt);
-        const s = S.sales.find(x => x.id === d.id);
-        toast(`Pedido #${d.num}${d.name ? " de " + d.name : ""} entregado` + (d.collected ? ` · el cadete cobró ${d.collected === "pos" ? "con POS" : "en efectivo"}` : ""));
-        if (s && !s.deliveredAt) queue("update", "sales/" + s.id, {deliveredAt: d.deliveredAt || Date.now(), collected: d.collected || null}, `Envío #${d.num} entregado`);
-      }
-    });
-  }
-}
+// (Compatibilidad: versiones anteriores dejaban que el cadete marcara "entregado". Ya no se usa.)
+function watchDeliveries() {}
 function deliveryBadge(s) {
   if (!s || s.mode !== "envio" || s.cancelled) return "";
   const d = deliveryOf(s.id);
-  if (d && d.status === "entregado") return `<span class="pill ok plain">Entregado ${d.deliveredAt ? hhmm(d.deliveredAt) : ""}${d.collected ? ` · cobró ${d.collected === "pos" ? "POS" : "efectivo"}` : ""}</span>`;
-  if (d) return `<span class="pill envio plain">Con el cadete</span>`;
-  if (s.deliveredAt) return `<span class="pill ok plain">Entregado ${hhmm(s.deliveredAt)}</span>`;
+  if (d && !d.tripClosed) return `<span class="pill envio plain">Con el cadete</span>`;
+  if (d) return `<span class="pill plain">Volvió · falta cobrar</span>`;
+  if (s.tripId || s.deliveredAt) return `<span class="pill ok plain">Entregado</span>`;
   return "";
 }
 function deliveryButtons(s) {
   if (!s || s.mode !== "envio" || s.cancelled || S.phone) return "";
   const sh = currentShift(); if (!sh || s.shiftId !== sh.id) return "";
   const d = deliveryOf(s.id);
-  if (!d && !s.deliveredAt) return `<button class="btn sm dark" data-act="assign" data-id="${s.id}">Asignar al cadete</button>`;
-  if (d && d.status === "asignado") return `<button class="btn sm ghost" data-act="unassign" data-id="${s.id}">Quitar asignación</button>`;
+  if (!d && !s.tripId && !s.deliveredAt) return `<button class="btn sm dark" data-act="assign" data-id="${s.id}">Asignar al cadete</button>`;
+  if (d && !d.tripClosed) return `<button class="btn sm ghost" data-act="unassign" data-id="${s.id}">Quitar asignación</button>`;
   return "";
 }
 
@@ -1381,7 +1434,7 @@ function newSale(status, payment, received) {
 }
 const cartItems = () => S.cart.map(l => ({id: l.id, name: l.name, price: l.price, qty: l.qty}));
 const cartFields = () => ({items: cartItems(), total: cartTotal(), ...orderFields(), editedAt: Date.now()});
-function resetCart() { S.cart = []; S.note = ""; S.far = false; S.editId = null; S.mode = "retiro"; S.addr = ""; S.onote = ""; }
+function resetCart() { S.cart = []; S.note = ""; S.far = false; S.farManual = false; S.editId = null; S.mode = "retiro"; S.addr = ""; S.onote = ""; }
 const isFar = () => S.mode === "envio" && S.far;
 const orderFields = () => ({note: S.note.trim(), mode: S.mode, address: S.mode === "envio" ? S.addr.trim() : "", orderNote: S.onote.trim(), far: isFar(), farFee: isFar() ? farFee() : 0});
 // Tipo de pedido, dirección y nota, para mostrar en listas y detalles.
@@ -1430,7 +1483,7 @@ function openTicket(id) {
   if (S.cart.length) { toast(S.editId ? "Guardá o salí del ticket que estás editando antes de abrir otro." : "Guardá o vaciá el pedido en pantalla antes de abrir un ticket guardado.", "bad"); return; }
   S.editId = id;
   S.cart = (s.items || []).map(it => ({...it}));
-  S.note = s.note || ""; S.far = !!s.far;
+  S.note = s.note || ""; S.far = !!s.far; S.farManual = false;
   S.mode = s.mode === "envio" ? "envio" : (s.far ? "envio" : "retiro"); S.addr = s.address || ""; S.onote = s.orderNote || "";
   closeModalSilently(); goSell();
   setTimeout(() => { const n = $("#note"); if (n) n.focus(); }, 0);
@@ -1576,7 +1629,7 @@ async function chargeCart(payment, received, btn, tip = null) {
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
   const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change, tipCard: tip || 0} : null;
-  if (printed) { syncDelivery(printed); syncKitchen(printed); } else sendToKitchen(S._lastSale); // venta directa: también va a cocina
+  if (printed) { syncDelivery(printed, false, true); syncKitchen(printed); } else sendToKitchen(S._lastSale); // venta directa: también va a cocina
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
@@ -1594,7 +1647,7 @@ async function chargeTicket(s, payment, received, btn, tip = null) {
   closeModal();
   moneyBurst(s.total, payment, change);
   printCopy({...s, status: "paid", payment, paidAt: Date.now(), received, change, tipCard: tip || 0}, "paid"); // 2.ª copia: Comprobante de pago
-  syncDelivery({...s, status: "paid", payment});
+  syncDelivery({...s, status: "paid", payment}, false, true);
   toast(`Ticket #${s.num} cobrado · ${fmt(s.total)} ${PAY[payment]}` + (change ? ` · vuelto ${fmt(change)}` : "") + (tip ? ` · propina ${fmt(tip)} para el cadete` : ""));
 }
 
@@ -1716,7 +1769,7 @@ async function doCloseShift(sh, sales, sum, counted, btn) {
   const closedShift = {...sh, status: "closed", closedAt, summary: sum, countedCash: counted, notes: ""};
   if (S.printer) printClosing(closedShift, clean, notes).then(ok => { if (ok) toast("Ticket de cierre impreso"); });
   for (const s of sales) { try { await S.db.doc("sales/" + s.id).delete(); } catch (e) {} }
-  for (const dl of (S.deliveries || []).filter(x => x.shiftId === sh.id && x.status === "entregado")) { try { await S.db.doc("deliveries/" + dl.id).delete(); } catch (e) {} }
+  for (const dl of (S.deliveries || []).filter(x => x.shiftId === sh.id)) { try { await S.db.doc("deliveries/" + dl.id).delete(); } catch (e) {} }
   for (const k of (S.kitchen || []).filter(x => x.shiftId === sh.id)) { try { await S.db.doc("kitchen/" + k.id).delete(); } catch (e) {} } // la pantalla de cocina arranca vacía el próximo turno
   closingFx(sum);
   setTimeout(() => showShiftDetail(closedShift, notes), reduceMotion() ? 0 : 750);
@@ -1795,18 +1848,19 @@ function applyDroppedLocation(text, e) {
     if (!row) { toast("Soltá la ubicación sobre un ticket de la lista.", "bad"); return; }
     const s = S.sales.find(x => x.id === row.dataset.sid); if (!s || !isPending(s)) return;
     const had = s.mode === "envio" && String(s.address || "").trim() && s.address.trim() !== text;
-    queue("update", "sales/" + s.id, {mode: "envio", address: text}, `Ubicación del ticket #${s.num}`);
-    syncDelivery({...s, mode: "envio", address: text}); syncKitchen({...s, mode: "envio", address: text});
-    if (S.editId === s.id) { S.mode = "envio"; S.addr = text; }
+    const zr = zoneCheck(text), farUpd = zr === null ? {} : {far: !zr, farFee: !zr ? farFee() : 0};
+    queue("update", "sales/" + s.id, {mode: "envio", address: text, ...farUpd}, `Ubicación del ticket #${s.num}`);
+    syncDelivery({...s, mode: "envio", address: text, ...farUpd}); syncKitchen({...s, mode: "envio", address: text});
+    if (S.editId === s.id) { S.mode = "envio"; S.addr = text; if (zr !== null) { S.far = !zr; S.farManual = false; } }
     if (S.savedRefresh) S.savedRefresh();
-    toast(`${had ? "Ubicación reemplazada" : "Ubicación cargada"} en el ticket #${s.num}${s.note ? " de " + s.note : ""}`);
+    toast(`${had ? "Ubicación reemplazada" : "Ubicación cargada"} en el ticket #${s.num}${s.note ? " de " + s.note : ""}${zr === false ? " · fuera de la zona: envío lejano" : zr === true ? " · dentro de la zona" : ""}`);
     return;
   }
   if (!$("#modal").hidden) { toast("Cerrá la ventana abierta y volvé a soltar la ubicación.", "bad"); return; }
   if (S.view !== "vender") { toast("Andá a Vender para cargar la ubicación en un pedido.", "bad"); return; }
   if (!currentShift()) { toast("Abrí el turno para cargar pedidos.", "bad"); return; }
   const had = S.mode === "envio" && S.addr.trim() && S.addr.trim() !== text;
-  S.mode = "envio"; S.addr = text; render();
+  S.mode = "envio"; S.addr = text; autoFar(); render();
   const info = $("#addr-info"); if (info) fx(info, "fx-bump");
   toast((had ? "Ubicación reemplazada" : "Ubicación cargada en el pedido · Envío") + (S.editId ? " · tocá Guardar ticket para guardar el cambio" : ""));
 }
@@ -2016,6 +2070,7 @@ const A = {
   "open-ticket": el => openTicket(el.dataset.id),
   assign: el => assignDelivery(el.dataset.id),
   kitchen: () => openKitchen(),
+  "trip-back": () => openTripBack(),
   kready: el => markReady(el.dataset.id),
   kundo: el => unmarkReady(el.dataset.id),
   unassign: el => unassignDelivery(el.dataset.id),
@@ -2080,14 +2135,14 @@ document.addEventListener("keydown", e => {
 document.addEventListener("input", e => {
   if (e.target.id === "note") S.note = e.target.value;
   if (e.target.id === "shiftnotes") onNotesInput(e.target.value);
-  if (e.target.id === "addr") { S.addr = e.target.value; const box = $("#addr-info"); if (box) box.innerHTML = locInfoHtml(S.addr); }
+  if (e.target.id === "addr") { S.addr = e.target.value; autoFar(); const box = $("#addr-info"); if (box) box.innerHTML = locInfoHtml(S.addr); }
   if (e.target.id === "onote") S.onote = e.target.value;
   if (e.target.id === "q") { S.q = e.target.value; render(); }
   if (e.target.id === "opencash") S.openCash = e.target.value;
 });
 document.addEventListener("change", e => {
-  if (e.target.id === "far") S.far = e.target.checked;
-  if (e.target.name === "omode") { S.mode = e.target.value; if (S.mode !== "envio") S.far = false; render(); if (S.mode === "envio") { const a = $("#addr"); if (a) a.focus(); } }
+  if (e.target.id === "far") { S.far = e.target.checked; S.farManual = true; } // lo que elegís a mano manda sobre la zona
+  if (e.target.name === "omode") { S.mode = e.target.value; if (S.mode !== "envio") S.far = false; else autoFar(); render(); if (S.mode === "envio") { const a = $("#addr"); if (a) a.focus(); } }
   if (e.target.id === "histdate" && e.target.value) { S.histDate = e.target.value; S.histPinned = S.histDate !== dayKey(Date.now()); render(); }
 });
 window.addEventListener("hashchange", () => { const v = location.hash.replace("#", ""); if (viewsHere().some(x => x[0] === v) && v !== S.view) { leaveConfig(); S.view = v; render(); } });
@@ -2190,6 +2245,49 @@ function goConfig() { S.view = "config"; S.cfgRendered = false; try { history.re
 function leaveConfig() { if (S.view === "config") { S.unlocked = false; S.cfgRendered = false; } }
 
 /* ---------- Pantalla de Configuración ---------- */
+/* Editor de la zona (Leaflet + OpenStreetMap, gratis). Se carga solo cuando se abre Configuración. */
+function loadLeaflet() {
+  if (window.L && window.L.map) return Promise.resolve(window.L);
+  return new Promise((res, rej) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(css);
+    const js = document.createElement("script"); js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    js.onload = () => res(window.L); js.onerror = rej; document.head.appendChild(js);
+  });
+}
+function mountZoneEditor(m) {
+  const box = m.querySelector("#zonemap"); if (!box) return;
+  let pts = (deliveryZone() || []).map(p => ({lat: p.lat, lng: p.lng}));
+  const info = m.querySelector("#c-zinfo");
+  loadLeaflet().then(LF => {
+    if (!document.body.contains(box)) return;
+    box.innerHTML = "";
+    const map = LF.map(box, {zoomControl: true});
+    LF.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: "© OpenStreetMap"}).addTo(map);
+    if (pts.length >= 3) map.fitBounds(LF.latLngBounds(pts.map(p => [p.lat, p.lng])).pad(0.25)); else map.setView([-34.765, -56.40], 14);
+    const poly = LF.polygon([], {color: "#C2311F", weight: 3, fillOpacity: 0.12}).addTo(map);
+    let marks = [];
+    const icon = LF.divIcon({className: "zpt", iconSize: [16, 16]});
+    const draw = () => {
+      poly.setLatLngs(pts.map(p => [p.lat, p.lng]));
+      marks.forEach(mk => mk.remove());
+      marks = pts.map((p, i) => { const mk = LF.marker([p.lat, p.lng], {draggable: true, icon}).addTo(map);
+        mk.on("drag", e => { const ll = e.target.getLatLng(); pts[i] = {lat: ll.lat, lng: ll.lng}; poly.setLatLngs(pts.map(q => [q.lat, q.lng])); });
+        return mk; });
+      info.textContent = pts.length ? `${pts.length} puntos${pts.length < 3 ? " (faltan " + (3 - pts.length) + ")" : ""}` : "Sin zona";
+    };
+    map.on("click", e => { pts.push({lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6)}); draw(); });
+    m.querySelector("#c-zundo").onclick = () => { pts.pop(); draw(); };
+    m.querySelector("#c-zclear").onclick = () => { if (!pts.length || confirm("¿Borrar todos los puntos de la zona?")) { pts = []; draw(); } };
+    m.querySelector("#c-zsave").onclick = async () => {
+      if (pts.length && pts.length < 3) { toast("La zona necesita al menos 3 puntos.", "bad"); return; }
+      const ok = await setSetting({zone: pts.map(p => ({lat: +(+p.lat).toFixed(6), lng: +(+p.lng).toFixed(6)}))});
+      if (ok) toast(pts.length ? "Zona guardada: los envíos fuera de ella se marcan como lejanos" : "Zona borrada: el envío lejano se marca a mano");
+    };
+    draw();
+    setTimeout(() => map.invalidateSize(), 200);
+  }).catch(() => { box.innerHTML = `<p class="hint" style="padding:16px">No se pudo cargar el mapa. Revisá la conexión y volvé a abrir Configuración.</p>`; });
+}
+
 function viewConfig() {
   const st = S.settings, T = S.ticket;
   const seg = (name, val, opts) => `<div class="seg" style="grid-template-columns:repeat(${opts.length},1fr)" role="radiogroup">${opts.map(([v, l]) => `<label><input type="radio" name="${name}" value="${v}" ${val === v ? "checked" : ""}>${l}</label>`).join("")}</div>`;
@@ -2215,6 +2313,11 @@ function viewConfig() {
         <label class="field"><span>Ciudad que se agrega a las direcciones escritas</span><input id="c-city" class="text" value="${esc(st.deliveryCity ?? "Ciudad del Plata, San José")}" placeholder="Ciudad del Plata, San José"></label>
         <p class="hint" style="margin:0">El cadete entra con su correo y contraseña en <strong id="c-cadlink">${esc(location.origin + location.pathname.replace(/[^/]*$/, "") + "cadete/")}</strong>. Solo ve sus envíos pendientes: no ve ventas, turnos ni configuración.</p>
         <div class="actions end"><button class="btn" id="c-copycad">Copiar enlace</button><button class="btn primary" id="c-save-cad">Guardar</button></div>
+      </div></div>
+      <div class="card"><header><h3>Zona de envíos</h3><span class="muted" id="c-zinfo">${deliveryZone() ? deliveryZone().length + " puntos guardados" : "Sin zona"}</span></header><div class="body">
+        <p class="hint" style="margin:0">Marcá con clics el borde de la <strong>zona normal</strong>, punto por punto, siguiendo las calles que usás de referencia. Los puntos se pueden arrastrar para corregirlos. Cuando cargás la ubicación exacta de un pedido, si cae <strong>fuera</strong> de la zona se marca solo el envío lejano (lo podés cambiar a mano).</p>
+        <div id="zonemap" class="zonemap"><p class="hint" style="padding:16px">Cargando mapa…</p></div>
+        <div class="actions end"><button class="btn" id="c-zundo">Deshacer último punto</button><button class="btn" id="c-zclear">Borrar todo</button><button class="btn primary" id="c-zsave">Guardar zona</button></div>
       </div></div>
       <div class="card"><header><h3>Pantalla de cocina</h3></header><div class="body">
         <p class="hint" style="margin:0">En la pantalla de la cocina abrí este enlace y entrá con la cuenta de cocina. Muestra todos los pedidos (guardados y cobrados) sin precios; cuando tocás <strong>Listo</strong> en la caja (botón <strong>Cocina</strong> o en Guardados), sale de esa pantalla.</p>
@@ -2295,6 +2398,7 @@ function mountConfig() {
     const ok = await setSetting({cadeteEmail: email, deliveryCity: m.querySelector("#c-city").value.trim()});
     if (ok) toast("Datos del cadete guardados");
   };
+  mountZoneEditor(m);
   m.querySelector("#c-copyk").onclick = () => { const u = m.querySelector("#c-kurl").textContent; (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => toast("Enlace de la cocina copiado"), () => toast(u)); };
   m.querySelector("#c-copycad").onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector("#c-cadlink").textContent); toast("Enlace copiado"); } catch (e) { toast("No se pudo copiar: seleccioná el enlace y copialo a mano.", "bad"); } };
   m.querySelector("#c-save-auth").onclick = async () => {
@@ -2640,7 +2744,7 @@ function closingLines(sh, sales, notes, T) {
   hr(); L.push({t: "CADETE", b: true});
   const base = m.cadeteBase != null ? m.cadeteBase : shiftCadeteBase(sh);
   row("Fijo del turno", money(base));
-  row(`Envíos lejanos (${m.farCount || 0})`, money(m.farTotal));
+  row(`Salidas lejanas (${m.farCount || 0})`, money(m.farTotal));
   row(`Propinas tarjeta (${m.tipCount || 0})`, money(m.tipTotal || 0));
   row("A pagar", money(m.cadeteTotal != null ? m.cadeteTotal : base + (m.farTotal || 0) + (m.tipTotal || 0)), {b: true});
   if ((m.products || []).length) {
