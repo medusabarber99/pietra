@@ -1278,12 +1278,16 @@ function assignDelivery(id) {
   const others = open ? tripOpen().filter(d => d.tripId === open && d.id !== id).length : 0;
   queue("set", "deliveries/" + id, {...deliveryFields(s), cadete: email, status: "asignado", tripId, tripClosed: false, assignedAt: Date.now()}, `Envío #${s.num} asignado al cadete`);
   queue("update", "sales/" + id, {tripId}, `Envío #${s.num}: salida del cadete`);
-  toast(`Pedido #${s.num} asignado al cadete · ${others ? `misma salida que ${others === 1 ? "otro pedido" : others + " pedidos"}` : "salida nueva"}`);
+  const k = kitchenOf(id);
+  if (k && k.status === "cocinando") queue("update", "kitchen/" + id, {status: "listo", readyAt: Date.now(), readyBy: "assign"}, `Pedido #${s.num} salió de cocina`);
+  toast(`Pedido #${s.num} asignado al cadete${k && k.status === "cocinando" ? " · salió de la pantalla de cocina" : ""} · ${others ? `misma salida que ${others === 1 ? "otro pedido" : others + " pedidos"}` : "salida nueva"}`);
 }
 function unassignDelivery(id) {
   const d = deliveryOf(id); if (!d) return;
   queue("delete", "deliveries/" + id, null, `Envío #${d.num} sin asignar`);
   queue("update", "sales/" + id, {tripId: null}, `Envío #${d.num} sin salida`);
+  const k = kitchenOf(id);
+  if (k && k.status === "listo" && k.readyBy === "assign") { queue("update", "kitchen/" + id, {status: "cocinando", readyAt: null, readyBy: null}, `Pedido #${d.num} volvió a cocina`); toast("Se quitó la asignación · el pedido volvió a la pantalla de cocina"); return; }
   toast("Se quitó la asignación");
 }
 // Cuando no queda nada por cobrar en la salida, el cadete volvió: se le borran también los que ya estaban pagos.
@@ -1556,7 +1560,7 @@ function openSaved() {
           <div class="l2" title="${detail.replace(/<[^>]*>/g, "")}">${detail}</div>
         </div>
         <span class="amt">${fmt(s.total)}</span>
-        <div class="btns">${kitchenButtons(s)}${deliveryButtons(s, true)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
+        <div class="btns">${deliveryButtons(s, true)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`; }).join("")}</div>`;
   };
   openModal("Guardados", `<div class="seg" role="radiogroup" aria-label="Ordenar por">
