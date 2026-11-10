@@ -2280,7 +2280,7 @@ function mountZoneEditor(m) {
     m.querySelector("#c-zclear").onclick = () => { if (!pts.length || confirm("¿Borrar todos los puntos de la zona?")) { pts = []; draw(); } };
     m.querySelector("#c-zsave").onclick = async () => {
       if (pts.length && pts.length < 3) { toast("La zona necesita al menos 3 puntos.", "bad"); return; }
-      const ok = await setSetting({zone: pts.map(p => ({lat: +(+p.lat).toFixed(6), lng: +(+p.lng).toFixed(6)}))});
+      const ok = await saveSettings({zone: pts.map(p => ({lat: +(+p.lat).toFixed(6), lng: +(+p.lng).toFixed(6)}))});
       if (ok) toast(pts.length ? "Zona guardada: los envíos fuera de ella se marcan como lejanos" : "Zona borrada: el envío lejano se marca a mano");
     };
     draw();
