@@ -316,6 +316,9 @@ tr.click:hover td{background:var(--sunk)}
 .srow.compact .l2{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .srow.compact .num{font-size:16px} .srow.compact .amt{font-size:17px}
 .srow.compact .btns{flex-wrap:nowrap}
+.srow.openable{cursor:pointer;transition:background .12s,border-color .12s,box-shadow .12s}
+.srow.openable:hover,.srow.openable:focus-visible{background:var(--sunk);border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft, rgba(194,49,31,.15))}
+.srow.openable.late:hover{box-shadow:inset 4px 0 0 var(--bad),0 0 0 2px var(--accent-soft, rgba(194,49,31,.15))}
 .srow.compact .btns .btn{padding:5px 10px}
 .saved-list:has(.compact){gap:6px}
 body.phone .srow.compact{grid-template-columns:auto minmax(0,1fr) auto}
@@ -1543,7 +1546,8 @@ function openSaved() {
       <div class="saved-list">${list.map(s => {
         // Fila compacta: 2 renglones (nombre + estado / productos + nota + dirección) para ver más tickets a la vez.
         const detail = [itemsText(s.items), s.orderNote ? "Nota: " + esc(s.orderNote) : "", s.mode === "envio" && s.address ? "📍 " + esc(addressShort(s.address)) : ""].filter(Boolean).join(" · ");
-        return `<div class="srow compact ${isStale(s) ? "late" : ""}" data-sid="${s.id}">
+        // En la PC, tocar el ticket (fuera de los botones) lo abre para editarlo.
+        return `<div class="srow compact ${isStale(s) ? "late" : ""} ${S.phone ? "" : "openable"}" data-sid="${s.id}" ${S.phone ? "" : `data-act="open-ticket" data-id="${s.id}" role="button" tabindex="0" title="Abrir el ticket para editarlo"`}>
         <span class="num">#${s.num}</span>
         <div class="main">
           <div class="l1"><span class="who">${s.note ? esc(s.note) : `<span class="muted">Sin nombre</span>`}</span>
@@ -1552,7 +1556,7 @@ function openSaved() {
           <div class="l2" title="${detail.replace(/<[^>]*>/g, "")}">${detail}</div>
         </div>
         <span class="amt">${fmt(s.total)}</span>
-        <div class="btns">${kitchenButtons(s)}${deliveryButtons(s, true)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
+        <div class="btns">${kitchenButtons(s)}${deliveryButtons(s, true)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`; }).join("")}</div>`;
   };
   openModal("Guardados", `<div class="seg" role="radiogroup" aria-label="Ordenar por">
@@ -1562,6 +1566,7 @@ function openSaved() {
     </div><div id="savedrows" class="form">${rows()}</div>`,
     {wide: true, xwide: true, onMount: d => {
       d.querySelectorAll("input[name=ps]").forEach(r => r.addEventListener("change", () => { S.pendSort = r.value; d.querySelector("#savedrows").innerHTML = rows(); }));
+      d.addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.classList && e.target.classList.contains("openable")) { e.preventDefault(); openTicket(e.target.dataset.id); } });
       // Mientras la lista está abierta, el tiempo y las alertas se actualizan solos.
       S.savedRefresh = () => { const box = d.querySelector("#savedrows"); if (box && document.body.contains(box)) box.innerHTML = rows(); else S.savedRefresh = null; };
     }});
