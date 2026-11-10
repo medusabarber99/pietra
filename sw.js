@@ -1,6 +1,6 @@
 // Guarda la app en el equipo para que abra aunque no haya internet.
 // Las páginas propias se piden primero a internet (así llegan las versiones nuevas) y, si no hay conexión, se usan las guardadas.
-const CACHE = "pietra-v5";
+const CACHE = "pietra-v6";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./ubicacion.js", "./cadete/", "./cadete/index.html", "./cadete/manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js",
   "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js",

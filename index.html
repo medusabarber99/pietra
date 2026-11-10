@@ -155,6 +155,7 @@ main{overflow:auto;min-height:0}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .btn.primary:hover{filter:brightness(1.07)}
 .btn.dark{background:var(--ink);border-color:var(--ink);color:var(--surface)}
+.btn.ok{background:var(--ok);border-color:var(--ok);color:#fff}
 .btn.ghost{background:transparent}
 .btn.danger-ghost{background:transparent;color:var(--bad);border-color:transparent}
 .btn.danger-ghost:hover{border-color:var(--bad)}
@@ -191,6 +192,14 @@ main{overflow:auto;min-height:0}
 .search input{width:100%;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 12px 10px 36px}
 .search::before{content:"";position:absolute;left:13px;top:50%;width:11px;height:11px;border:2px solid var(--muted);border-radius:50%;transform:translateY(-60%)}
 .search::after{content:"";position:absolute;left:24px;top:58%;width:6px;height:2px;background:var(--muted);transform:rotate(45deg)}
+.kitchenbtn{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.kitchenbtn .n{background:var(--ink);color:var(--surface);border-radius:999px;padding:0 8px;font-size:13px}
+.kitchenbtn.zero .n{background:var(--sunk);color:var(--muted)}
+.krow{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface)}
+.krow.late{border-color:var(--bad)} .krow.warn{border-color:var(--warn)}
+.krow .num{font-family:var(--display);font-weight:700;font-size:18px;color:var(--muted)}
+.krow .its{font-size:14px;color:var(--muted)}
+.klist{display:flex;flex-direction:column;gap:8px}
 .savedbtn{border:2px solid var(--warn);background:var(--warn-soft);color:var(--ink);border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
 .savedbtn:hover{filter:brightness(1.04)}
 .savedbtn .n{background:var(--warn);color:#fff;border-radius:999px;min-width:22px;height:22px;display:grid;place-items:center;font-size:12px;padding:0 6px}
@@ -502,7 +511,7 @@ function looksLikePhone() {
 function detectPhone() { const m = S.devMode || deviceSetting(); return m === "phone" ? true : m === "pc" ? false : looksLikePhone(); }
 const viewsHere = () => S.phone ? VIEWS.filter(v => v[0] !== "vender") : VIEWS;
 // Acciones de venta y cobro que no se hacen desde el celular.
-const PC_ONLY = new Set(["add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit", "assign", "unassign"]);
+const PC_ONLY = new Set(["kitchen", "kready", "kundo", "add", "inc", "dec", "clear-cart", "exit-edit", "delete-ticket", "open-ticket", "saved", "charge-cart", "hold", "charge", "cancel-sale", "open-shift", "close-shift", "print-saved", "print-edit", "assign", "unassign"]);
 const NAV_ICONS = {
   ventas: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"></path><path d="M9 7h6M9 11h6M9 15h4"></path></svg>',
   turno: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>',
@@ -619,9 +628,9 @@ async function save(fn, okMsg) {
    campos, así que reenviarla después de un corte no duplica nada. */
 const OUTBOX_KEY = "pietra-outbox-v1";
 const OB = {ops: [], failed: [], recent: [], persist: true, flushing: false, inflight: null, net: navigator.onLine !== false, lastTry: 0};
-const RAW = {sales: [], shifts: [], inv: [], deliveries: []};
+const RAW = {sales: [], shifts: [], inv: [], deliveries: [], kitchen: []};
 const PENDING = new Map(); // escrituras ya entregadas a Firebase que esperan conexión
-const COLL_KEY = {sales: "sales", shifts: "shifts", inventory: "inv", deliveries: "deliveries"};
+const COLL_KEY = {sales: "sales", shifts: "shifts", inventory: "inv", deliveries: "deliveries", kitchen: "kitchen"};
 function obLoad() {
   try { const raw = localStorage.getItem(OUTBOX_KEY); const d = raw ? JSON.parse(raw) : {}; OB.ops = d.ops || []; OB.failed = d.failed || []; }
   catch (e) { OB.persist = false; }
@@ -689,7 +698,7 @@ function overlay(coll, docs) {
   });
   return [...map.values()];
 }
-function recompute() { S.sales = overlay("sales", RAW.sales); S.shifts = overlay("shifts", RAW.shifts); S.inv = overlay("inventory", RAW.inv); S.deliveries = overlay("deliveries", RAW.deliveries); }
+function recompute() { S.sales = overlay("sales", RAW.sales); S.shifts = overlay("shifts", RAW.shifts); S.inv = overlay("inventory", RAW.inv); S.deliveries = overlay("deliveries", RAW.deliveries); S.kitchen = overlay("kitchen", RAW.kitchen); }
 function syncState() {
   const n = OB.ops.length;
   if (!OB.net && n) return {cls: "bad", text: S.phone ? `Sin conexión · ${n}` : `Sin conexión · ${plural(n, "cambio sin sincronizar", "cambios sin sincronizar")}`};
@@ -748,7 +757,7 @@ function connectDb() {
   const timer = setTimeout(() => { if (S.status !== "ready") { S.status = "slow"; render(); } }, 10000);
   const db = makeDb(FS);
   S.db = db;
-  const keys = ["menu", "inv", "shifts", "sales", "settings", "ticket", "auth", "deliveries"];
+  const keys = ["menu", "inv", "shifts", "sales", "settings", "ticket", "auth", "deliveries", "kitchen"];
   const done = (k, fromCache) => {
     S.got[k] = true; if (!fromCache) S.fresh[k] = true;
     if (keys.every(x => S.got[x]) && S.status === "loading") S.status = "ready";
@@ -768,6 +777,7 @@ function connectDb() {
   coll(db.collection("shifts").orderBy("openedAt", "desc").limit(120), "shifts");
   coll(db.collection("sales"), "sales");
   coll(db.collection("deliveries"), "deliveries");
+  coll(db.collection("kitchen"), "kitchen");
   db.doc("config/settings").onSnapshot(snap => { S.settings = snap.exists ? {...snap.data()} : {}; S.settingsExists = snap.exists; done("settings", snap.metadata.fromCache); }, onErr);
   db.doc("config/ticket").onSnapshot(snap => { S.ticket = snap.exists ? {...snap.data()} : {}; done("ticket", snap.metadata.fromCache); }, onErr);
   db.doc("config/auth").onSnapshot(snap => { S.auth = snap.exists ? {...snap.data()} : null; done("auth", snap.metadata.fromCache); }, onErr);
@@ -821,6 +831,7 @@ function render() {
   if (S.editId && S.status === "ready" && !S.sales.some(x => x.id === S.editId)) { resetCart(); toast("El ticket que estabas editando ya no está"); }
   // La lista de Guardados (si está abierta) se actualiza junto con la pantalla: asignar, quitar, entregar, eliminar.
   if (S.savedRefresh && !$("#modal").hidden) S.savedRefresh();
+  if (S.kitchenRefresh && !$("#modal").hidden) S.kitchenRefresh();
   let banner = "";
   if (S.updateReady) banner = `<p class="banner"><span><strong>Hay una versión nueva de la app.</strong> Tocá Actualizar para verla${OB.ops.length ? " (los cambios sin sincronizar se conservan)" : ""}.</span><button class="btn sm primary" data-act="app-update">Actualizar</button></p>`;
   else
@@ -867,6 +878,7 @@ function viewSell() {
   const toolbar = `<div class="toolbar">
       <label class="search"><input id="q" type="search" placeholder="Buscar producto…" value="${esc(S.q)}" aria-label="Buscar producto" autocomplete="off"></label>
       ${(() => { const late = pendingTickets().filter(isStale).length; return `<button class="savedbtn ${pendN ? "" : "zero"} ${late ? "late" : ""}" data-act="saved" ${late ? `aria-label="Guardados: ${pendN}, ${late} con más de ${STALE_MIN} minutos sin cobrar"` : ""}>Guardados <span class="n">${pendN}</span>${late ? `<span class="late-tag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg>${late} +${STALE_MIN} min</span>` : ""}<kbd class="kbd-hint">F8</kbd></button>`; })()}
+      ${(() => { const n = kitchenCooking().length; return `<button class="kitchenbtn ${n ? "" : "zero"}" data-act="kitchen" title="Pedidos en preparación">Cocina <span class="n">${n}</span><kbd class="kbd-hint">F9</kbd></button>`; })()}
     </div>`;
   let catalog;
   if (!sh) {
@@ -909,7 +921,7 @@ function viewSell() {
         ${S.cart.length ? `<button class="btn ghost sm" data-act="clear-cart">Vaciar pedido</button>` : ""}`;
   return `<div class="sell">
     <div class="catalog">${catalog}
-      <div class="shortcuts" aria-hidden="true"><span><kbd>/</kbd> buscar</span><span><kbd>Enter</kbd> agregar el primero</span><span><kbd>F2</kbd> cobrar</span><span><kbd>F4</kbd> guardar ticket</span><span><kbd>F8</kbd> guardados</span><span><kbd>Esc</kbd> cerrar</span></div>
+      <div class="shortcuts" aria-hidden="true"><span><kbd>/</kbd> buscar</span><span><kbd>Enter</kbd> agregar el primero</span><span><kbd>F2</kbd> cobrar</span><span><kbd>F4</kbd> guardar ticket</span><span><kbd>F8</kbd> guardados</span><span><kbd>F9</kbd> cocina</span><span><kbd>Esc</kbd> cerrar</span></div>
     </div>
     <aside class="ticket ${editing ? "editing" : ""}" aria-label="Pedido actual">
       ${head}
@@ -951,7 +963,7 @@ function salesTable(sales) {
   const tk = s => !s.cancelled;
   const any = sales.some(s => act(s) || tk(s));
   if (S.phone) return `<div class="mlist">${sales.map(s => `<div class="mrow ${s.cancelled ? "cancel" : ""}" ${tk(s) ? `data-act="ticket-view" data-id="${s.id}" role="button" tabindex="0"` : ""}>
-      <div class="mr-top"><strong>#${s.num ?? ""}</strong><span class="muted">${hhmm(s.createdAt)}</span>${payPill(s)}${deliveryBadge(s)}${s.far && !s.cancelled ? `<span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}<span class="sp"></span><span class="amt">${fmt(s.total)}</span></div>
+      <div class="mr-top"><strong>#${s.num ?? ""}</strong><span class="muted">${hhmm(s.createdAt)}</span>${payPill(s)}${kitchenBadge(s)}${deliveryBadge(s)}${s.far && !s.cancelled ? `<span class="pill warn plain">+${s.farFee || farFee()}</span>` : ""}<span class="sp"></span><span class="amt">${fmt(s.total)}</span></div>
       ${s.note ? `<strong>${esc(s.note)}</strong>` : ""}
       <div class="mr-sub">${itemsText(s.items)}</div>
       ${orderMeta(s) ? `<div>${orderMeta(s, {inline: true})}</div>` : ""}
@@ -960,9 +972,9 @@ function salesTable(sales) {
     ${sales.map(s => `<tr class="${s.cancelled ? "cancel" : ""}">
       <td>${s.num ?? ""}</td><td>${hhmm(s.createdAt)}</td>
       <td class="items-sum">${itemsText(s.items)}${s.note ? `<br><strong>${esc(s.note)}</strong>` : ""}${orderMeta(s)}</td>
-      <td class="keep">${payPill(s)}${s.far && !s.cancelled ? ` <span class="pill warn plain" title="Envío lejano">+${s.farFee || farFee()}</span>` : ""} ${deliveryBadge(s)}</td>
+      <td class="keep">${payPill(s)}${s.far && !s.cancelled ? ` <span class="pill warn plain" title="Envío lejano">+${s.farFee || farFee()}</span>` : ""} ${kitchenBadge(s)} ${deliveryBadge(s)}</td>
       <td class="num">${fmt(s.total)}</td>
-      ${any ? `<td class="num keep">${deliveryButtons(s)} ${tk(s) ? `<button class="btn sm ghost" data-act="ticket-view" data-id="${s.id}">Ticket</button> ` : ""}${act(s) ? `${s.status === "pending" ? `<button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button> <button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button> ` : ""}<button class="btn sm ghost" data-act="cancel-sale" data-id="${s.id}">Anular</button>` : ""}</td>` : ""}
+      ${any ? `<td class="num keep">${kitchenButtons(s)}${deliveryButtons(s)} ${tk(s) ? `<button class="btn sm ghost" data-act="ticket-view" data-id="${s.id}">Ticket</button> ` : ""}${act(s) ? `${s.status === "pending" ? `<button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button> <button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button> ` : ""}<button class="btn sm ghost" data-act="cancel-sale" data-id="${s.id}">Anular</button>` : ""}</td>` : ""}
     </tr>`).join("")}</tbody></table></div>`;
 }
 
@@ -1255,6 +1267,73 @@ function deliveryButtons(s) {
   return "";
 }
 
+/* ---------- Pantalla de cocina ----------
+   Cada pedido (guardado o cobrado en el momento) se copia a kitchen/{saleId} con lo justo para cocinar:
+   número, nombre, Retiro/Envío, productos con cantidad y nota. Sin precios. La cocina solo lo muestra;
+   "Listo" se marca acá en la caja y el pedido sale de la pantalla de cocina. */
+const kitchenOf = id => (S.kitchen || []).find(k => k.id === id);
+const kitchenCooking = () => (S.kitchen || []).filter(k => k.status === "cocinando").sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+function kitchenFields(s) {
+  return {saleId: s.id, shiftId: s.shiftId || null, num: s.num ?? null, name: s.note || "", mode: s.mode === "envio" ? "envio" : "retiro",
+    note: s.orderNote || "", items: (s.items || []).map(it => ({qty: it.qty, name: it.name}))};
+}
+function sendToKitchen(s) {
+  if (!s || !s.id || kitchenOf(s.id)) return;
+  const now = Date.now();
+  queue("set", "kitchen/" + s.id, {...kitchenFields(s), status: "cocinando", createdAt: s.createdAt || now, updatedAt: now, modified: false, readyAt: null}, `Pedido #${s.num} a cocina`);
+}
+function syncKitchen(sale, removed = false) {
+  const k = kitchenOf(sale.id); if (!k) return;
+  if (removed || sale.cancelled) { if (k.status !== "anulado") queue("update", "kitchen/" + sale.id, {status: "anulado", updatedAt: Date.now()}, `Pedido #${k.num} sacado de cocina`); return; }
+  if (k.status === "anulado") return;
+  const f = kitchenFields(sale);
+  const cook = x => JSON.stringify([x.items, x.note]);
+  const changed = cook(f) !== cook(k); // cambió lo que hay que cocinar
+  if (!changed && f.name === k.name && f.mode === k.mode && f.num === k.num) return;
+  queue("update", "kitchen/" + sale.id, {...f, updatedAt: Date.now(), modified: changed ? true : !!k.modified,
+    ...(changed && k.status === "listo" ? {status: "cocinando", readyAt: null} : {})}, `Pedido #${k.num} actualizado en cocina`);
+  if (changed && k.status === "listo") toast(`El pedido #${k.num} volvió a cocina porque cambiaron los productos`, "warn");
+}
+function markReady(id) {
+  const k = kitchenOf(id); if (!k || k.status !== "cocinando") return;
+  queue("update", "kitchen/" + id, {status: "listo", readyAt: Date.now()}, `Pedido #${k.num} listo`);
+  toast(`Pedido #${k.num}${k.name ? " de " + k.name : ""} listo · salió de la pantalla de cocina`);
+}
+function unmarkReady(id) {
+  const k = kitchenOf(id); if (!k || k.status !== "listo") return;
+  queue("update", "kitchen/" + id, {status: "cocinando", readyAt: null}, `Pedido #${k.num} volvió a cocina`);
+  toast(`Pedido #${k.num} volvió a la pantalla de cocina`);
+}
+function kitchenBadge(s) {
+  if (!s || s.cancelled) return "";
+  const k = kitchenOf(s.id); if (!k) return "";
+  if (k.status === "listo") return `<span class="pill ok plain">Listo ✓ ${k.readyAt ? hhmm(k.readyAt) : ""}</span>`;
+  if (k.status === "cocinando") return `<span class="pill plain">En cocina · ${Math.max(0, Math.floor((Date.now() - (k.createdAt || Date.now())) / 60000))} min</span>`;
+  return "";
+}
+function kitchenButtons(s) {
+  if (!s || s.cancelled || S.phone) return "";
+  const k = kitchenOf(s.id);
+  return k && k.status === "cocinando" ? `<button class="btn sm ok" data-act="kready" data-id="${s.id}">Listo</button>` : "";
+}
+function openKitchen() {
+  if (S.phone) return;
+  const rows = () => {
+    const cook = kitchenCooking();
+    const done = (S.kitchen || []).filter(k => k.status === "listo" && Date.now() - (k.readyAt || 0) < 30 * 60000).sort((a, b) => (b.readyAt || 0) - (a.readyAt || 0));
+    const m = k => Math.max(0, Math.floor((Date.now() - (k.createdAt || Date.now())) / 60000));
+    const its = k => (k.items || []).map(it => `${it.qty}× ${esc(it.name)}`).join(" · ");
+    return (cook.length ? `<div class="klist">${cook.map(k => `<div class="krow ${m(k) >= 25 ? "late" : m(k) >= 15 ? "warn" : ""}">
+        <span class="num">#${k.num ?? ""}</span>
+        <div><strong>${esc(k.name || "Sin nombre")}</strong> <span class="pill plain">${k.mode === "envio" ? "Envío" : "Retiro"}</span> <span class="muted">${m(k) < 1 ? "recién" : m(k) + " min"}</span><div class="its">${its(k)}${k.note ? ` · <strong>${esc(k.note)}</strong>` : ""}</div></div>
+        <button class="btn ok" data-act="kready" data-id="${k.id}">Listo</button></div>`).join("")}</div>`
+      : `<p class="empty">No hay pedidos en preparación.</p>`)
+      + (done.length ? `<h3 style="margin:16px 0 8px;font-size:15px">Listos (últimos 30 min)</h3><div class="klist">${done.map(k => `<div class="krow"><span class="num">#${k.num ?? ""}</span><div><strong>${esc(k.name || "Sin nombre")}</strong> <span class="pill ok plain">Listo ${hhmm(k.readyAt)}</span></div><button class="btn sm ghost" data-act="kundo" data-id="${k.id}">Deshacer</button></div>`).join("")}</div>` : "");
+  };
+  openModal("Cocina", `<p class="hint" style="margin:0 0 10px">Lo que está en la pantalla de la cocina. Tocá <strong>Listo</strong> cuando el pedido sale y desaparece de su pantalla.</p><div id="kitchenrows">${rows()}</div>`, {wide: true,
+    onMount: () => { S.kitchenRefresh = () => { const box = document.querySelector("#kitchenrows"); if (box) box.innerHTML = rows(); else S.kitchenRefresh = null; }; }});
+}
+
 /* ---------- Animaciones ---------- */
 const reduceMotion = () => { try { return matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
 // Reproduce una animación CSS sobre un elemento sin bloquear nada (la clase se quita sola al terminar).
@@ -1330,11 +1409,12 @@ async function holdTicket(btn) {
   if (ed) {
     msg = `Ticket #${ed.num} actualizado · ${fmt(cartTotal())}`;
     ok = queue("update", "sales/" + ed.id, cartFields(), `Ticket #${ed.num} editado`);
-    syncDelivery({...ed, ...cartFields()});
+    syncDelivery({...ed, ...cartFields()}); syncKitchen({...ed, ...cartFields()});
   } else {
     const sale = newSale("pending"), id = newId("sales");
     msg = `Ticket #${sale.num}${sale.note ? " de " + sale.note : ""} guardado · ${fmt(sale.total)} por cobrar`;
     ok = queue("set", "sales/" + id, sale, `Ticket #${sale.num} guardado (${fmt(sale.total)})`);
+    if (ok) sendToKitchen({...sale, id});
     if (ok) printCopy({...sale, id}, "pending"); // 1.ª copia: Pedido pendiente (solo al guardarlo, no al editarlo)
   }
   S.busy = false;
@@ -1370,6 +1450,7 @@ function openDeleteTicket(id) {
       if (S.editId === id) resetCart();
       closeModalSilently();
       syncDelivery(s, true); // la ficha del cadete se borra junto con el ticket
+      syncKitchen(s, true);  // y sale de la pantalla de cocina
       queue("delete", "sales/" + id, null, `Ticket #${s.num} eliminado`); toast(`Ticket #${s.num} eliminado`);
     }});
 }
@@ -1398,7 +1479,7 @@ function openSaved() {
           <div class="what"><span class="age ${isStale(s) ? "late" : ""}">${isStale(s) ? `Hace ${ageText(s)} sin cobrar` : `Hace ${ageText(s)}`}</span> · creado ${hhmm(s.createdAt)}</div>
           <div class="what">${itemsText(s.items)}</div>${orderMeta(s) ? `<div class="what">${orderMeta(s, {inline: true})}</div>` : ""}</div>
         <span class="amt">${fmt(s.total)}</span>
-        <div class="btns">${deliveryBadge(s)}${deliveryButtons(s)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir ticket</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
+        <div class="btns">${kitchenBadge(s)}${kitchenButtons(s)}${deliveryBadge(s)}${deliveryButtons(s)}<button class="btn sm ghost" data-act="print-saved" data-id="${s.id}" title="Imprime el pedido como está ahora">Imprimir ticket</button><button class="btn sm" data-act="open-ticket" data-id="${s.id}">Abrir</button><button class="btn sm primary" data-act="charge" data-id="${s.id}">Cobrar</button></div>
       </div>`).join("")}</div>`;
   };
   openModal("Guardados", `<div class="seg" role="radiogroup" aria-label="Ordenar por">
@@ -1495,7 +1576,7 @@ async function chargeCart(payment, received, btn, tip = null) {
   S.busy = false;
   if (!ok) { btn.disabled = false; return; }
   const printed = ed ? {...ed, ...fields, status: "paid", payment, paidAt, received, change, tipCard: tip || 0} : null;
-  if (printed) syncDelivery(printed);
+  if (printed) { syncDelivery(printed); syncKitchen(printed); } else sendToKitchen(S._lastSale); // venta directa: también va a cocina
   resetCart();
   closeModal();
   moneyBurst(total, payment, change);
@@ -1571,7 +1652,7 @@ function openCancel(id) {
     <div class="actions end"><button class="btn ghost" data-act="close-modal">No anular</button><button class="btn primary" id="cok">Anular</button></div>`,
     {onMount: d => d.querySelector("#cok").onclick = async e => {
       e.target.disabled = true;
-      const ok = queue("update", "sales/" + id, {cancelled: true, cancelledAt: Date.now()}, `${pend ? "Ticket" : "Venta"} #${s.num} anulada`); toast(pend ? "Ticket anulado" : "Venta anulada"); syncDelivery(s, true);
+      const ok = queue("update", "sales/" + id, {cancelled: true, cancelledAt: Date.now()}, `${pend ? "Ticket" : "Venta"} #${s.num} anulada`); toast(pend ? "Ticket anulado" : "Venta anulada"); syncDelivery(s, true); syncKitchen(s, true);
       if (ok) { closeModal(); if (s.stockUse) applyStock(s.stockUse, 1); } else e.target.disabled = false;
     }});
 }
@@ -1636,6 +1717,7 @@ async function doCloseShift(sh, sales, sum, counted, btn) {
   if (S.printer) printClosing(closedShift, clean, notes).then(ok => { if (ok) toast("Ticket de cierre impreso"); });
   for (const s of sales) { try { await S.db.doc("sales/" + s.id).delete(); } catch (e) {} }
   for (const dl of (S.deliveries || []).filter(x => x.shiftId === sh.id && x.status === "entregado")) { try { await S.db.doc("deliveries/" + dl.id).delete(); } catch (e) {} }
+  for (const k of (S.kitchen || []).filter(x => x.shiftId === sh.id)) { try { await S.db.doc("kitchen/" + k.id).delete(); } catch (e) {} } // la pantalla de cocina arranca vacía el próximo turno
   closingFx(sum);
   setTimeout(() => showShiftDetail(closedShift, notes), reduceMotion() ? 0 : 750);
 }
@@ -1714,7 +1796,7 @@ function applyDroppedLocation(text, e) {
     const s = S.sales.find(x => x.id === row.dataset.sid); if (!s || !isPending(s)) return;
     const had = s.mode === "envio" && String(s.address || "").trim() && s.address.trim() !== text;
     queue("update", "sales/" + s.id, {mode: "envio", address: text}, `Ubicación del ticket #${s.num}`);
-    syncDelivery({...s, mode: "envio", address: text});
+    syncDelivery({...s, mode: "envio", address: text}); syncKitchen({...s, mode: "envio", address: text});
     if (S.editId === s.id) { S.mode = "envio"; S.addr = text; }
     if (S.savedRefresh) S.savedRefresh();
     toast(`${had ? "Ubicación reemplazada" : "Ubicación cargada"} en el ticket #${s.num}${s.note ? " de " + s.note : ""}`);
@@ -1933,6 +2015,9 @@ const A = {
   "delete-ticket": el => openDeleteTicket(el.dataset.id),
   "open-ticket": el => openTicket(el.dataset.id),
   assign: el => assignDelivery(el.dataset.id),
+  kitchen: () => openKitchen(),
+  kready: el => markReady(el.dataset.id),
+  kundo: el => unmarkReady(el.dataset.id),
   unassign: el => unassignDelivery(el.dataset.id),
   "print-saved": el => printPendingNow(S.sales.find(x => x.id === el.dataset.id), el),
   "print-edit": el => { const ed = editingSale(); if (ed) printPendingNow({...ed, ...cartFields(), editedAt: Date.now()}, el); },
@@ -1990,6 +2075,7 @@ document.addEventListener("keydown", e => {
   else if (e.key === "F2") { e.preventDefault(); openCharge(null); }
   else if (e.key === "F4") { e.preventDefault(); holdTicket($('[data-act="hold"]')); }
   else if (e.key === "F8") { e.preventDefault(); openSaved(); }
+  else if (e.key === "F9") { e.preventDefault(); openKitchen(); }
 });
 document.addEventListener("input", e => {
   if (e.target.id === "note") S.note = e.target.value;
@@ -2130,6 +2216,11 @@ function viewConfig() {
         <p class="hint" style="margin:0">El cadete entra con su correo y contraseña en <strong id="c-cadlink">${esc(location.origin + location.pathname.replace(/[^/]*$/, "") + "cadete/")}</strong>. Solo ve sus envíos pendientes: no ve ventas, turnos ni configuración.</p>
         <div class="actions end"><button class="btn" id="c-copycad">Copiar enlace</button><button class="btn primary" id="c-save-cad">Guardar</button></div>
       </div></div>
+      <div class="card"><header><h3>Pantalla de cocina</h3></header><div class="body">
+        <p class="hint" style="margin:0">En la pantalla de la cocina abrí este enlace y entrá con la cuenta de cocina. Muestra todos los pedidos (guardados y cobrados) sin precios; cuando tocás <strong>Listo</strong> en la caja (botón <strong>Cocina</strong> o en Guardados), sale de esa pantalla.</p>
+        <p style="margin:0;overflow-wrap:anywhere"><strong id="c-kurl">${esc(location.origin + location.pathname.replace(/[^/]*$/, "") + "cocina/")}</strong></p>
+        <div class="actions end"><button class="btn" id="c-copyk">Copiar enlace</button></div>
+      </div></div>
 
       <div class="card"><header><h3>Apariencia</h3></header><div class="body">
         <div class="field"><span>Tema</span>${seg("c-theme", st.theme || "auto", [["auto", "Automático"], ["light", "Claro"], ["dark", "Oscuro"]])}</div>
@@ -2204,6 +2295,7 @@ function mountConfig() {
     const ok = await setSetting({cadeteEmail: email, deliveryCity: m.querySelector("#c-city").value.trim()});
     if (ok) toast("Datos del cadete guardados");
   };
+  m.querySelector("#c-copyk").onclick = () => { const u = m.querySelector("#c-kurl").textContent; (navigator.clipboard ? navigator.clipboard.writeText(u) : Promise.reject()).then(() => toast("Enlace de la cocina copiado"), () => toast(u)); };
   m.querySelector("#c-copycad").onclick = async () => { try { await navigator.clipboard.writeText(m.querySelector("#c-cadlink").textContent); toast("Enlace copiado"); } catch (e) { toast("No se pudo copiar: seleccioná el enlace y copialo a mano.", "bad"); } };
   m.querySelector("#c-save-auth").onclick = async () => {
     const u = m.querySelector("#c-user").value.trim(), p1 = m.querySelector("#c-pass").value, p2 = m.querySelector("#c-pass2").value;
