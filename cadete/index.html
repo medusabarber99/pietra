@@ -135,6 +135,11 @@ function toast(msg, kind) { const t = document.createElement("div"); t.className
 
 firebase.initializeApp(FIREBASE_CONFIG);
 AUTH = firebase.auth(); FS = firebase.firestore();
+// La sesión queda guardada en el equipo hasta tocar "Salir" (y se le pide al navegador que no borre esos datos).
+AUTH.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) {}
+const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
 try { FS.settings({ignoreUndefinedProperties: true, merge: true}); } catch (e) {}
 FS.enablePersistence({synchronizeTabs: true}).catch(() => {});
 if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("../sw.js").catch(() => {});
@@ -154,7 +159,8 @@ AUTH.onAuthStateChanged(u => {
       $("#main").innerHTML = `<div class="empty"><strong>No se pueden ver los envíos.</strong><br>${err && err.code === "permission-denied" ? "Esta cuenta no tiene permiso. Pedile al local que revise las reglas de Firebase." : "Revisá la conexión e intentá de nuevo."}</div>`;
     });
 });
-$("#logout").onclick = () => AUTH.signOut().then(() => location.reload());
+// Pide confirmación para que no se cierre la sesión por un toque sin querer.
+$("#logout").onclick = () => { if (confirm("¿Cerrar sesión? Vas a tener que volver a escribir el correo y la contraseña.")) AUTH.signOut().then(() => location.reload()); };
 
 // Los envíos desaparecen solos cuando la caja los cobra o los quita: no hace falta avisar.
 function checkChanges() {}
@@ -165,12 +171,12 @@ function showLogin() {
   $("#app").hidden = true;
   const box = $("#login"); box.hidden = false;
   box.innerHTML = `<form id="lf"><h1>Envíos · Pietra</h1><p class="hint">Entrá con la cuenta de cadete.</p>
-    <label class="field"><span>Correo</span><input id="le" type="email" autocomplete="username" required></label>
+    <label class="field"><span>Correo</span><input id="le" type="email" autocomplete="username" value="${esc(lsGet("cadeteEmail"))}" required></label>
     <label class="field"><span>Contraseña</span><input id="lp" type="password" autocomplete="current-password" required></label>
     <p class="hint" id="lerr" style="color:var(--bad)" hidden></p><button class="btn primary" id="lb">Entrar</button></form>`;
   $("#lf").onsubmit = async e => {
     e.preventDefault(); const b = $("#lb"); b.disabled = true; b.textContent = "Entrando…";
-    try { await AUTH.signInWithEmailAndPassword($("#le").value.trim(), $("#lp").value); }
+    try { await AUTH.signInWithEmailAndPassword($("#le").value.trim(), $("#lp").value); lsSet("cadeteEmail", $("#le").value.trim()); }
     catch (x) { const c = x && x.code; $("#lerr").textContent = c === "auth/network-request-failed" ? "No hay conexión." : c === "auth/too-many-requests" ? "Demasiados intentos. Esperá unos minutos." : "Correo o contraseña incorrectos."; $("#lerr").hidden = false; b.disabled = false; b.textContent = "Entrar"; }
   };
 }

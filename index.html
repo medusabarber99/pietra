@@ -307,6 +307,12 @@ tr.click:hover td{background:var(--sunk)}
 .dialog{position:relative;background:var(--surface);border-radius:16px;width:min(480px,100%);max-height:calc(100% - 16px);overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
 .dialog.wide{width:min(820px,100%)}
 .dialog.xwide{width:min(1180px,100%)}
+/* Cobrar: dos columnas para que entre todo sin deslizar; el botón de confirmar queda siempre a la vista. */
+.dialog.charge{width:min(800px,100%)}
+.paycols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.paycols > div{display:flex;flex-direction:column;gap:12px;min-width:0}
+.dialog.charge .actions{position:sticky;bottom:-18px;background:var(--surface);padding:10px 0 18px;margin-bottom:-18px;border-top:1px solid var(--line)}
+@media (max-width:720px){.paycols{grid-template-columns:1fr}}
 .srow.compact{grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;padding:6px 10px}
 .srow.compact .main{min-width:0;display:flex;flex-direction:column;gap:1px}
 .srow.compact .l1{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
@@ -1185,7 +1191,7 @@ function viewMenu() {
 /* ---------- Modal y avisos ---------- */
 function openModal(title, body, opts = {}) {
   const root = $("#modal");
-  root.innerHTML = `<div class="backdrop" data-act="close-modal"></div><div class="dialog ${opts.wide ? "wide" : ""} ${opts.xwide ? "xwide" : ""}" role="dialog" aria-modal="true" aria-labelledby="mtitle">
+  root.innerHTML = `<div class="backdrop" data-act="close-modal"></div><div class="dialog ${opts.wide ? "wide" : ""} ${opts.xwide ? "xwide" : ""} ${opts.cls || ""}" role="dialog" aria-modal="true" aria-labelledby="mtitle">
     <header><h2 id="mtitle">${esc(title)}</h2><button class="icon" data-act="close-modal" aria-label="Cerrar">×</button></header>
     <div class="mbody">${body}</div></div>`;
   root.hidden = false;
@@ -1587,6 +1593,7 @@ function openCharge(saleId) {
   const quick = [...new Set([Math.ceil(total / 100) * 100, Math.ceil(total / 500) * 500, Math.ceil(total / 1000) * 1000, Math.ceil(total / 2000) * 2000])].filter(v => v > total).slice(0, 4);
   const who = s ? s.note : S.note.trim();
   openModal(s || ed ? `Cobrar ticket #${(s || ed).num}` : "Cobrar", `
+    <div class="paycols"><div>
     ${s ? `<p style="margin:0">${itemsText(s.items)}</p>` : ""}${who ? `<p style="margin:0"><strong>${esc(who)}</strong></p>` : ""}
     ${(() => { const m = orderMeta(s || orderFields(), {inline: true}); return m ? `<p style="margin:0">${m}</p>` : ""; })()}
     <div class="paybig"><span>Total a cobrar</span><strong>${fmt(total)}</strong></div>
@@ -1594,18 +1601,20 @@ function openCharge(saleId) {
       <label><input type="radio" name="pm" value="efectivo" checked>Efectivo</label>
       <label><input type="radio" name="pm" value="pos">POS</label>
     </div>
+    <p class="hint" id="poshint" hidden>Cobrá en el POS y confirmá cuando la operación esté aprobada.</p>
+    </div><div>
     <div id="cashbox" class="form">
       <label class="field"><span>El cliente entrega ($)</span><input id="recv" class="bigin" type="number" min="0" step="1" inputmode="numeric" placeholder="${Math.round(total)}" autofocus></label>
       <div class="quick"><button type="button" class="btn sm" data-v="${total}">Justo</button>${quick.map(v => `<button type="button" class="btn sm" data-v="${v}">${fmt(v)}</button>`).join("")}</div>
       <div class="paybig change" id="chg"><span>Vuelto</span><strong>${fmt(0)}</strong></div>
     </div>
-    <p class="hint" id="poshint" hidden>Cobrá en el POS y confirmá cuando la operación esté aprobada.</p>
     ${s || ed ? `<label class="field tipfield"><span>Propina del delivery con tarjeta ($) · opcional</span>
       <input id="tipcard" type="number" min="0" step="1" inputmode="numeric" placeholder="0" value="${Number((s || ed).tipCard) > 0 ? Math.round(Number((s || ed).tipCard)) : ""}">
       <small class="muted">Es para el cadete: no cambia el total de la venta ni el efectivo o POS.</small></label>` : ""}
     <p class="hint shortcuts" style="margin:0"><span><kbd>E</kbd> efectivo</span><span><kbd>P</kbd> POS</span><span><kbd>Enter</kbd> confirmar</span></p>
+    </div></div>
     <div class="actions end"><button class="btn ghost" data-act="close-modal">Volver</button><button class="btn primary lg" id="payok">Confirmar cobro</button></div>`,
-    {onMount: d => {
+    {cls: "charge", onMount: d => {
       const inp = d.querySelector("#recv"), chg = d.querySelector("#chg"), ok = d.querySelector("#payok");
       const method = () => d.querySelector("input[name=pm]:checked").value;
       const upd = () => {
