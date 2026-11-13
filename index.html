@@ -199,6 +199,18 @@ main{overflow:auto;min-height:0}
 .kitchenbtn{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:8px 14px;font-weight:700;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
 .kitchenbtn .n{background:var(--ink);color:var(--surface);border-radius:999px;padding:0 8px;font-size:13px}
 .kitchenbtn.zero .n{background:var(--sunk);color:var(--muted)}
+/* Barra rápida de cocina: un botón por pedido en preparación; un toque lo saca de la pantalla de cocina. */
+.kbar{flex-basis:100%;display:flex;gap:6px;align-items:center;overflow-x:auto;padding-bottom:2px;scrollbar-width:thin}
+.kbar > .lbl{font-size:13px;font-weight:700;color:var(--muted);white-space:nowrap}
+.kchip{border:2px solid var(--line);background:var(--surface);color:var(--ink);border-radius:10px;padding:5px 6px 5px 10px;cursor:pointer;display:inline-flex;gap:8px;align-items:center;white-space:nowrap;font-weight:600;flex:none}
+.kchip .who{max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.kchip .min{font-size:13px;color:var(--muted)}
+.kchip .ok{background:var(--ok);color:#fff;border-radius:7px;padding:1px 9px;font-weight:700}
+.kchip:hover,.kchip:focus-visible{border-color:var(--ok)}
+.kchip.warn{border-color:var(--warn)} .kchip.warn .min{color:var(--warn);font-weight:700}
+.kchip.late{border-color:var(--bad)} .kchip.late .min{color:var(--bad);font-weight:700}
+.kchip.undo{border-style:dashed;color:var(--muted);font-weight:500;padding-right:10px}
+.krow .key{display:inline-grid;place-items:center;min-width:22px;height:22px;border-radius:6px;background:var(--sunk);font-size:13px;font-weight:700;color:var(--muted);margin-right:4px}
 .krow{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface)}
 .krow.late{border-color:var(--bad)} .krow.warn{border-color:var(--warn)}
 .krow .num{font-family:var(--display);font-weight:700;font-size:18px;color:var(--muted)}
@@ -911,6 +923,7 @@ function viewSell() {
       ${(() => { const late = pendingTickets().filter(isStale).length; return `<button class="savedbtn ${pendN ? "" : "zero"} ${late ? "late" : ""}" data-act="saved" ${late ? `aria-label="Guardados: ${pendN}, ${late} con más de ${STALE_MIN} minutos sin cobrar"` : ""}>Guardados <span class="n">${pendN}</span>${late ? `<span class="late-tag"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6.2"></circle><path d="M8 4.6V8l2.4 1.6"></path></svg>${late} +${STALE_MIN} min</span>` : ""}<kbd class="kbd-hint">F8</kbd></button>`; })()}
       ${(() => { const t = openTripId(); if (!t) return ""; const n = tripOpen().filter(d => d.tripId === t).length; return `<button class="tripbtn" data-act="trip-back" title="El cadete está en una salida. Tocá cuando vuelva (se cierra sola al cobrar sus pedidos).">Cadete en salida · ${n} <span>Volvió</span></button>`; })()}
       ${(() => { const n = kitchenCooking().length; return `<button class="kitchenbtn ${n ? "" : "zero"}" data-act="kitchen" title="Pedidos en preparación">Cocina <span class="n">${n}</span><kbd class="kbd-hint">F9</kbd></button>`; })()}
+      ${kitchenBar()}
     </div>`;
   let catalog;
   if (!sh) {
@@ -1391,6 +1404,17 @@ function kitchenBadge(s) {
   if (k.status === "cocinando") return `<span class="pill plain">En cocina · ${Math.max(0, Math.floor((Date.now() - (k.createdAt || Date.now())) / 60000))} min</span>`;
   return "";
 }
+// Barra rápida en la pantalla de venta: cada pedido en cocina es un botón ("#12 Martina · 8 min ✓ Listo").
+// El último que salió queda un minuto como "Deshacer" por si se tocó sin querer.
+function kitchenBar() {
+  const cook = kitchenCooking();
+  const last = (S.kitchen || []).filter(k => k.status === "listo" && Date.now() - (k.readyAt || 0) < 60000).sort((a, b) => (b.readyAt || 0) - (a.readyAt || 0))[0];
+  if (!cook.length && !last) return "";
+  const m = k => Math.max(0, Math.floor((Date.now() - (k.createdAt || Date.now())) / 60000));
+  return `<div class="kbar" role="group" aria-label="Pedidos en cocina"><span class="lbl">En cocina:</span>
+    ${cook.map(k => `<button class="kchip ${m(k) >= 25 ? "late" : m(k) >= 15 ? "warn" : ""}" data-act="kready" data-id="${k.id}" title="Marcar listo: sale de la pantalla de cocina${(k.items || []).length ? " · " + esc((k.items || []).map(it => it.qty + "× " + it.name).join(", ")) : ""}"><strong>#${k.num ?? ""}</strong>${k.name ? `<span class="who">${esc(k.name)}</span>` : ""}<span class="min">${m(k) < 1 ? "recién" : m(k) + " min"}</span><span class="ok">✓ Listo</span></button>`).join("")}
+    ${last ? `<button class="kchip undo" data-act="kundo" data-id="${last.id}" title="Vuelve a la pantalla de cocina">↶ Deshacer #${last.num ?? ""}</button>` : ""}</div>`;
+}
 function kitchenButtons(s) {
   if (!s || s.cancelled || S.phone) return "";
   const k = kitchenOf(s.id);
@@ -1403,15 +1427,21 @@ function openKitchen() {
     const done = (S.kitchen || []).filter(k => k.status === "listo" && Date.now() - (k.readyAt || 0) < 30 * 60000).sort((a, b) => (b.readyAt || 0) - (a.readyAt || 0));
     const m = k => Math.max(0, Math.floor((Date.now() - (k.createdAt || Date.now())) / 60000));
     const its = k => (k.items || []).map(it => `${it.qty}× ${esc(it.name)}`).join(" · ");
-    return (cook.length ? `<div class="klist">${cook.map(k => `<div class="krow ${m(k) >= 25 ? "late" : m(k) >= 15 ? "warn" : ""}">
-        <span class="num">#${k.num ?? ""}</span>
+    return (cook.length ? `<div class="klist">${cook.map((k, i) => `<div class="krow ${m(k) >= 25 ? "late" : m(k) >= 15 ? "warn" : ""}">
+        <span class="num">${i < 9 ? `<kbd class="key">${i + 1}</kbd>` : ""}#${k.num ?? ""}</span>
         <div><strong>${esc(k.name || "Sin nombre")}</strong> <span class="pill plain">${k.mode === "envio" ? "Envío" : "Retiro"}</span> <span class="muted">${m(k) < 1 ? "recién" : m(k) + " min"}</span><div class="its">${its(k)}${k.note ? ` · <strong>${esc(k.note)}</strong>` : ""}</div></div>
         <button class="btn ok" data-act="kready" data-id="${k.id}">Listo</button></div>`).join("")}</div>`
       : `<p class="empty">No hay pedidos en preparación.</p>`)
       + (done.length ? `<h3 style="margin:16px 0 8px;font-size:15px">Listos (últimos 30 min)</h3><div class="klist">${done.map(k => `<div class="krow"><span class="num">#${k.num ?? ""}</span><div><strong>${esc(k.name || "Sin nombre")}</strong> <span class="pill ok plain">Listo ${hhmm(k.readyAt)}</span></div><button class="btn sm ghost" data-act="kundo" data-id="${k.id}">Deshacer</button></div>`).join("")}</div>` : "");
   };
-  openModal("Cocina", `<p class="hint" style="margin:0 0 10px">Lo que está en la pantalla de la cocina. Tocá <strong>Listo</strong> cuando el pedido sale y desaparece de su pantalla.</p><div id="kitchenrows">${rows()}</div>`, {wide: true,
-    onMount: () => { S.kitchenRefresh = () => { const box = document.querySelector("#kitchenrows"); if (box) box.innerHTML = rows(); else S.kitchenRefresh = null; }; }});
+  openModal("Cocina", `<p class="hint" style="margin:0 0 10px">Lo que está en la pantalla de la cocina. Tocá <strong>Listo</strong> cuando el pedido sale y desaparece de su pantalla. Con el teclado: apretá el número del pedido (1, 2, 3…).</p><div id="kitchenrows">${rows()}</div>`, {wide: true,
+    onMount: d => {
+      // Teclas 1 a 9: marca listo el pedido de ese renglón (en el orden en que se ven).
+      d.addEventListener("keydown", e => {
+        if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || !/^[1-9]$/.test(e.key)) return;
+        const k = kitchenCooking()[Number(e.key) - 1]; if (!k) return;
+        e.preventDefault(); markReady(k.id);
+      }); S.kitchenRefresh = () => { const box = document.querySelector("#kitchenrows"); if (box) box.innerHTML = rows(); else S.kitchenRefresh = null; }; }});
 }
 
 /* ---------- Animaciones ---------- */
