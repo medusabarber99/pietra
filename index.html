@@ -265,11 +265,11 @@ kbd{font:600 11px/1 var(--body);border:1px solid currentColor;border-radius:4px;
 .locked h3{font-size:22px}
 
 .ticket{background:var(--surface);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-.ticket header{padding:16px 18px 10px;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid var(--line)}
+.ticket header{padding:10px 14px 8px;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid var(--line)}
 .ticket header h2{font-size:20px}
 .ticket header .muted{margin-left:auto}
-.lines{flex:1 1 auto;overflow:auto;padding:6px 10px;min-height:64px}
-.line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:8px;border-bottom:1px dashed var(--line)}
+.lines{flex:1 1 auto;overflow:auto;padding:4px 10px;min-height:150px}
+.line{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;padding:5px 8px;border-bottom:1px dashed var(--line)}
 .line .nm{font-weight:500}
 .line .up{font-size:12px;color:var(--muted)}
 .stepper{display:flex;align-items:center;border:1px solid var(--line);border-radius:8px}
@@ -278,10 +278,24 @@ kbd{font:600 11px/1 var(--body);border:1px solid currentColor;border-radius:4px;
 .stepper span{min-width:24px;text-align:center;font-weight:600}
 .line .st{min-width:74px;text-align:right;font-weight:600}
 .empty{color:var(--muted);text-align:center;padding:36px 16px}
-.tfoot{padding:12px 18px 10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:12px;background:var(--sunk);flex:0 1 auto;min-height:0;overflow:auto}
+.tfoot{padding:10px 14px 6px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:7px;background:var(--sunk);flex:0 1 auto;min-height:0;overflow:auto}
+/* Datos del pedido compactos: Retiro/Envío y nombre en una fila; dirección y "lejano" en otra; nota en una línea. */
+.orow{display:grid;grid-template-columns:150px minmax(0,1fr);gap:8px;align-items:stretch}
+.orow.addr{grid-template-columns:minmax(0,1fr) auto}
+.orow .seg.compact label{padding:7px 4px;font-size:14px}
+.tfoot input.text{padding:8px 10px}
+.locinfo:empty{display:none}
+/* La nota del pedido siempre en blanco (también en modo oscuro) para encontrarla de un vistazo. */
+#onote{background:#FFFFFF;color:#141414;caret-color:#141414;border:2px solid #CFCAC2;color-scheme:light}
+#onote::placeholder{color:#8A857D}
+.farchip{display:inline-flex;gap:6px;align-items:center;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);cursor:pointer;font-weight:600;font-size:14px;white-space:nowrap}
+.farchip input{width:18px;height:18px;accent-color:var(--accent)}
+.farchip:has(input:checked){border-color:var(--warn);background:var(--warn-soft)}
 /* Total y botones de cobrar/guardar: siempre a la vista, aunque sea un envío con dirección (los datos de arriba se acomodan). */
-.tpay{flex:none;padding:8px 18px 14px;display:flex;flex-direction:column;gap:8px;background:var(--sunk);box-shadow:0 -6px 10px -8px rgba(0,0,0,.25)}
-.tpay .total strong{font-size:30px}
+.tpay{flex:none;padding:6px 14px 12px;display:flex;flex-direction:column;gap:8px;background:var(--sunk);box-shadow:0 -6px 10px -8px rgba(0,0,0,.25)}
+.tpay .total strong{font-size:28px}
+.tpay .paybtns .btn{padding:12px 10px}
+.ticket header .btn.sm{padding:3px 10px;margin-left:4px}
 .total{display:flex;align-items:baseline;justify-content:space-between}
 .total span{color:var(--muted);font-weight:500}
 .total strong{font-family:var(--display);font-size:34px;font-weight:800}
@@ -955,7 +969,7 @@ function viewSell() {
     : `<p class="empty">${editing ? "El ticket quedó vacío. Agregá productos o eliminalo." : "Tocá los productos del menú para armar el pedido."}</p>`;
   const head = editing
     ? `<header><h2>Ticket #${editing.num}</h2><span class="pill warn plain">Editando</span><span class="muted">${hhmm(editing.createdAt)}</span></header>`
-    : `<header><h2>Pedido</h2>${sh ? `<span class="muted">Ticket #${nextNum(sh)}</span>` : ""}</header>`;
+    : `<header><h2>Pedido</h2>${sh ? `<span class="muted">Ticket #${nextNum(sh)}</span>` : ""}${S.cart.length ? `<button class="btn ghost sm" data-act="clear-cart">Vaciar</button>` : ""}</header>`;
   const actions = editing
     ? `<div class="paybtns">
           <button class="btn primary" data-act="charge-cart" ${can ? "" : "disabled"}>Cobrar ahora<kbd class="kbd-hint">F2</kbd></button>
@@ -965,8 +979,7 @@ function viewSell() {
     : `<div class="paybtns">
           <button class="btn primary" data-act="charge-cart" ${can ? "" : "disabled"}>Cobrar ahora<kbd class="kbd-hint">F2</kbd></button>
           <button class="btn dark" data-act="hold" ${can ? "" : "disabled"}>Guardar ticket<kbd class="kbd-hint">F4</kbd></button>
-        </div>
-        ${S.cart.length ? `<button class="btn ghost sm" data-act="clear-cart">Vaciar pedido</button>` : ""}`;
+        </div>`;
   return `<div class="sell">
     <div class="catalog">${catalog}
       <div class="shortcuts" aria-hidden="true"><span><kbd>/</kbd> buscar</span><span><kbd>Enter</kbd> agregar el primero</span><span><kbd>F2</kbd> cobrar</span><span><kbd>F4</kbd> guardar ticket</span><span><kbd>F8</kbd> guardados</span><span><kbd>F9</kbd> cocina</span><span><kbd>Esc</kbd> cerrar</span></div>
@@ -975,15 +988,19 @@ function viewSell() {
       ${head}
       <div class="lines">${lines}</div>
       <div class="tfoot">
-        <div class="seg two-opt compact" role="radiogroup" aria-label="Tipo de pedido">
-          <label><input type="radio" name="omode" value="retiro" ${S.mode !== "envio" ? "checked" : ""}>Retiro</label>
-          <label><input type="radio" name="omode" value="envio" ${S.mode === "envio" ? "checked" : ""}>Envío</label>
+        <div class="orow">
+          <div class="seg two-opt compact" role="radiogroup" aria-label="Tipo de pedido">
+            <label><input type="radio" name="omode" value="retiro" ${S.mode !== "envio" ? "checked" : ""}>Retiro</label>
+            <label><input type="radio" name="omode" value="envio" ${S.mode === "envio" ? "checked" : ""}>Envío</label>
+          </div>
+          <input class="text" id="note" placeholder="Nombre del cliente" aria-label="Nombre del cliente" value="${esc(S.note)}" autocomplete="off">
         </div>
-        <label class="field"><span>Nombre del cliente</span><input class="text" id="note" placeholder="Nombre o mesa" value="${esc(S.note)}" autocomplete="off"></label>
-        ${S.mode === "envio" ? `<label class="field"><span>Dirección o ubicación</span><input class="text" id="addr" placeholder="Pegá la dirección o el enlace de ubicación de WhatsApp" value="${esc(S.addr)}" autocomplete="off"></label>
-        <div id="addr-info" class="locinfo" aria-live="polite">${locInfoHtml(S.addr)}</div>
-        <label class="farbox"><input type="checkbox" id="far" ${S.far ? "checked" : ""}> +${farFee()} envío lejano <small>Para el cadete, no se cobra</small></label>` : ""}
-        <label class="field"><span>Nota del pedido</span><textarea class="text" id="onote" rows="2" placeholder="Ej.: sin cebolla, bien cocida, cortada en 8">${esc(S.onote)}</textarea></label>
+        ${S.mode === "envio" ? `<div class="orow addr">
+          <input class="text" id="addr" placeholder="Dirección o ubicación de WhatsApp" aria-label="Dirección o ubicación" value="${esc(S.addr)}" autocomplete="off">
+          <label class="farchip" title="Envío lejano: +${farFee()} para el cadete, no se le cobra al cliente"><input type="checkbox" id="far" ${S.far ? "checked" : ""}>+${farFee()} lejano</label>
+        </div>
+        <div id="addr-info" class="locinfo" aria-live="polite">${locInfoHtml(S.addr)}</div>` : ""}
+        <input class="text" id="onote" placeholder="Nota: sin cebolla, bien cocida…" aria-label="Nota del pedido" value="${esc(S.onote)}" autocomplete="off">
       </div>
       <div class="tpay">
         <div class="total"><span>Total</span><strong>${fmt(total)}</strong></div>
@@ -1270,11 +1287,11 @@ function autoFar() {
   S.far = !r; const box = $("#far"); if (box) box.checked = S.far;
 }
 function locInfoHtml(raw) {
-  if (!String(raw || "").trim()) return `<span class="muted">Ej.: Calle 5 1234 · un enlace de Google Maps · la ubicación que mandó el cliente por WhatsApp</span>`;
+  if (!String(raw || "").trim()) return "";
   const L = Ubicacion.parse(raw, deliveryCity()), d = Ubicacion.describe(L), w = Ubicacion.wazeUrl(L), m = Ubicacion.mapsUrl(L);
   const z = deliveryZone(), r = zoneCheck(raw);
   const zone = !z ? "" : r === true ? ` <span class="pill ok plain">Dentro de la zona</span>` : r === false ? ` <span class="pill warn plain">Fuera de la zona → envío lejano</span>`
-    : ` <span class="muted">· Zona: no se puede calcular sin un punto exacto; marcá el envío lejano a mano si corresponde.</span>`;
+    : ` <span class="muted" title="No se puede calcular la zona sin un punto exacto; marcá el envío lejano a mano si corresponde.">· Zona: sin punto exacto</span>`;
   return `<span class="pill ${d.ok ? "ok" : "warn"} plain">${esc(d.label)}</span> <span class="muted">${esc(d.detail)}</span>${zone}
     <span class="loclinks">${w ? `<a href="${esc(w)}" target="_blank" rel="noopener">Probar en Waze</a>` : ""}${m ? `<a href="${esc(m)}" target="_blank" rel="noopener">Ver en Maps</a>` : ""}</span>`;
 }
